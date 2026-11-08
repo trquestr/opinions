@@ -55,7 +55,7 @@ html, body {
 }
 
 @media (pointer: fine) {
-  .hero.cursor-ready {
+  .hero {
     cursor: none;
   }
 }

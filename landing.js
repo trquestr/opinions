@@ -580,21 +580,41 @@
   let cursorEnabled = false;
   let lastPointerX = -9999;
   let lastPointerY = -9999;
+  const cursorReveal = { value: 0 };
+  let cursorRevealTween = null;
 
   function setCursorEnabled(enabled) {
     cursorEnabled = !!enabled;
+    if (cursorRevealTween) {
+      cursorRevealTween.kill();
+      cursorRevealTween = null;
+    }
+
     if (cursorEnabled) {
       hero.classList.add('cursor-ready');
       if (lastPointerX >= 0 && lastPointerY >= 0 && !document.hidden) {
         pointer.moveTo(lastPointerX, lastPointerY);
       }
+      cursorReveal.value = 0;
+      if (window.gsap && !motionPreference.matches) {
+        cursorRevealTween = window.gsap.to(cursorReveal, {
+          value: 1,
+          duration: 0.85,
+          ease: 'power2.out',
+          onUpdate: scheduleRender
+        });
+      } else {
+        cursorReveal.value = 1;
+      }
       scheduleRender();
     } else {
       hero.classList.remove('cursor-ready');
+      cursorReveal.value = 0;
       if (typeof pointer !== 'undefined') pointer.leave();
       if (typeof FIN !== 'undefined' && FIN) FIN.fill(0);
       if (typeof FR !== 'undefined' && FR) FR.fill(0);
       if (typeof FT !== 'undefined' && FT) FT.fill(0);
+      if (typeof FE !== 'undefined' && FE) FE.fill(0);
       if (typeof FDX !== 'undefined' && FDX) FDX.fill(0);
       if (typeof FDY !== 'undefined' && FDY) FDY.fill(0);
       if (typeof FST !== 'undefined' && FST) FST.fill(0);
@@ -775,7 +795,7 @@
   const PAD = 32;
 
   let fieldCount = 0;
-  let FX, FY, FDX, FDY, FR, FT, FST, FSF, FGS, FSS, FIN;
+  let FX, FY, FDX, FDY, FR, FT, FE, FST, FSF, FGS, FSS, FIN;
   let activeField = [];
   let bins = [];
   let binCols = 0;
@@ -803,6 +823,7 @@
           if (ddx * ddx + ddy * ddy < maxR2) {
             if (!FIN[i]) {
               FIN[i] = 1;
+              FE[i] = 0;
               activeField.push(i);
             }
           }
@@ -881,6 +902,7 @@
     FGS = new Float32Array(fieldCount);
     FSS = new Float32Array(fieldCount);
     FIN = new Uint8Array(fieldCount);
+    FE = new Float32Array(fieldCount);
     activeField = [];
 
     for (let i = 0; i < fieldCount; i++) {
@@ -1096,6 +1118,7 @@
             const ddy = FY[i] - pointer.y;
             if (ddx * ddx + ddy * ddy < fr2) {
               FIN[i] = 1;
+              FE[i] = 0;
               activeField.push(i);
             }
           }
@@ -1125,7 +1148,17 @@
       let ty = 0;
       let targetStretch = 0;
       if (proximity > 0) {
-        FT[i] = (minR + (maxR - minR) * Math.pow(proximity, 1.25)) * FSF[i];
+        // Каждая капля пробивается сквозь полотно: FE[i] нарастает от 0 к 1
+        const emergeSpeed = (0.10 + proximity * 0.14) * FSF[i];
+        FE[i] += (1.0 - FE[i]) * (1 - Math.pow(1 - emergeSpeed, s));
+
+        // Эффект выпуклого поверхностного натяжения (bloom):
+        // капля слегка приподнимается над полотном при рождении (+20%), затем мягко оседает
+        const e = Math.min(1.0, FE[i]);
+        const bloom = Math.sin(e * Math.PI) * 0.20;
+        const emergeFactor = (e + bloom) * cursorReveal.value;
+
+        FT[i] = (minR + (maxR - minR) * Math.pow(proximity, 1.25)) * FSF[i] * emergeFactor;
         if (stretching) {
           tx = sx * proximity;
           ty = sy * proximity;
@@ -1135,6 +1168,7 @@
         }
       } else {
         FT[i] = 0;
+        FE[i] += (0.0 - FE[i]) * (1 - Math.pow(0.80, s));
       }
 
       if (hasWaves) {
@@ -1183,6 +1217,7 @@
         FDY[i] = 0;
         FST[i] = 0;
         FIN[i] = 0;
+        FE[i] = 0;
         continue;
       }
 
@@ -1233,7 +1268,7 @@
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length))) scheduleRender();
+    if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length)) || (cursorRevealTween && cursorRevealTween.isActive())) scheduleRender();
   }
 
   window.addEventListener('pointermove', (e) => {
