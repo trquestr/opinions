@@ -149,25 +149,22 @@
         if (rCore <= 0.01 && absorb <= 0.001) continue;
 
         float dCore = 1e5;
+        vec4 core = vec4(0.0);
+        vec2 dir = vec2(1.0, 0.0);
         if (rCore > 0.01) {
-          vec4 core = u_dropCore[i];
+          core = u_dropCore[i];
           vec2 sVec = core.zw;
           float stretch = length(sVec);
-          vec2 dir = stretch > 0.001 ? (sVec / stretch) : vec2(1.0, 0.0);
+          dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
           dCore = sdDroplet(p, core.xy, dir, rCore, stretch);
           float kCore = min(9.5, rCore * 1.45);
           dCores = smin(dCores, dCore, kCore);
         }
 
-        // Штрих буквы тянется от точки касания до текущего центра самой капли:
-        // ось штриха остаётся 100% прямой (не колбасится), а по самой ГРАНИ буквы идут
-        // плавные капиллярные микро-наплывы поверхностного натяжения (edgeFluid >= 0)
+        // Штрих буквы тянется от точки касания до текущего центра самой капли
         if (absorb > 0.001) {
           vec4 seg = u_dropSeg[i];
           float dStrokeRaw;
-          float sCoord = 0.0;
-          float h = 0.0;
-          float side = 0.0;
 
           if (segType < 0.5) {
             vec2 pa = p - seg.xy;
@@ -180,11 +177,21 @@
             dStrokeRaw = sdArc(p, seg.xy, u_yahArcR, seg.z, seg.w);
           }
 
-          // Строгая равномерная толщина штрихов без утолщений, наплывов и раздуваний
+          // Строгая равномерная толщина штриха буквы
           float dStroke = dStrokeRaw - u_strokeR;
-          float dOwn = min(dCore, dStroke);
+          float dOwn = dStroke;
 
-          // Чистый min без smin между штрихами
+          if (rCore > 0.01) {
+            // Органический каплевидный мениск перетекания капли в штрих буквы:
+            // спереди сохраняется круглая выпуклая форма капли, а сзади формируется
+            // плавный сужающийся перешеек (teardrop neck), плавно переходящий в линию буквы
+            float forward = dot(p - core.xy, dir);
+            float neckWeight = forward <= 0.0 ? 1.0 : max(0.0, 1.0 - forward / max(0.001, rCore * 0.75));
+            float kNeck = rCore * 1.65 * neckWeight;
+            dOwn = smin(dCore, dStroke, kNeck);
+          }
+
+          // Чистый min без smin между отдельными штрихами, чтобы стыки букв оставались строгими
           dStrokes = min(dStrokes, dOwn);
         }
       }
@@ -450,7 +457,7 @@
 
     // Минимальная дистанция появления от конечной точки штриха (буквы):
     // точки не должны появляться в упор к буквам, адаптируясь под экран
-    const minSpawnDist = Math.max(55, Math.min(Math.min(width, height) * 0.26, 240));
+    const minSpawnDist = Math.max(45, Math.min(Math.min(width, height) * 0.15, 125));
     const margin = Math.max(16, Math.min(28, width * 0.04));
 
     drops = [];
@@ -581,7 +588,7 @@
       if (window.gsap && !motionPreference.matches) {
         cursorRevealTween = window.gsap.to(cursorReveal, {
           value: 1,
-          duration: 0.85,
+          duration: 0.32,
           ease: 'power2.out',
           onUpdate: scheduleRender
         });
@@ -622,14 +629,31 @@
       return;
     }
 
-    // Выстраиваем каскадную очерёдность (ближние капли с рандомным разбросом прилетают первыми уже через ~0.65с,
-    // а дальние подлетают поочерёдно на протяжении ~3.2с), чтобы точки НИКОГДА не ждали друг друга на местах!
-    const order = Array.from({ length: drops.length }, (_, i) => ({
+    // Очерёдность появления и вылета капель:
+    // 1) Финальные 8 капель хвоста выбираются из близких/умеренных дистанций к буквам,
+    // чтобы завершающие штрихи формировались в поле зрения вокруг слова, а не на краях экрана.
+    // 2) Основная масса капель распределяется с органичным сочетанием ближних и дальних дистанций.
+    const decDrops = 8;
+    const dropsWithDist = drops.map((d, i) => ({
       i,
-      score: drops[i].radial * 0.45 + Math.random() * 0.55
-    }))
-      .sort((a, b) => a.score - b.score)
-      .map((item) => item.i);
+      dist: Math.hypot(d.sx - d.ax, d.sy - d.ay),
+      radial: d.radial
+    })).sort((a, b) => a.dist - b.dist);
+
+    const closeCandidates = dropsWithDist.slice(0, Math.min(28, drops.length));
+    closeCandidates.sort(() => Math.random() - 0.5);
+    const tailIndices = closeCandidates.slice(0, decDrops).map(x => x.i);
+    const tailSet = new Set(tailIndices);
+
+    const mainIndices = [];
+    for (let i = 0; i < drops.length; i++) {
+      if (!tailSet.has(i)) {
+        mainIndices.push(i);
+      }
+    }
+    mainIndices.sort(() => Math.random() - 0.5);
+
+    const order = [...mainIndices, ...tailIndices];
 
     mainTimeline = window.gsap.timeline({
       onComplete() {
@@ -637,28 +661,29 @@
       }
     });
 
-    const flightEases = ['power1.in', 'sine.in'];
+    const flightEases = ['power2.in', 'circ.in', 'power3.in', 'power2.in'];
     const absorbEases = ['power2.out', 'power3.out'];
 
     // 1. Старт полёта капель (Этап 3):
     // Динамический профиль (согласно графику распределения):
-    // 1) Плавный старт с отметки 1.30с с паузы ~0.22с и уверенный разгон к пику (~15 капель)
-    // 2) Насыщенный флюидный каскад пика: ~63 капли с комфортным тактом (~0.036-0.038с, ~26-27 капель/сек)
-    // 3) Компактный выразительный хвост: лишь ~14 финальных капель с нарастанием пауз до ~0.25с
+    // 1) Плавный органичный старт взлётов с отметки 2.20с (пока капли продолжают непрерывно рождаться на холсте)
+    // 2) Уверенный разгон от стартовой паузы 0.24с к пику (~15 капель)
+    // 3) Насыщенный флюидный каскад пика: ~69 капель с комфортным тактом (~0.038с, ~26 капель/сек)
+    // 4) Авторский хвост: ровно 8 финальных капель с нарастанием пауз (до 0.85с между предпоследней и последней)
     const launchTimes = [];
-    let curLaunch = 1.30;
-    const gapStart = 0.22;
+    let curLaunch = 2.20;
+    const gapStart = 0.24;
     const gapPeak = 0.038;
-    const gapEnd = 0.34;
+    const gapEnd = 0.85;
     const rAccEnd = 0.16;    // граница завершения разгона (~15 капель)
-    const rDecStart = 0.80;  // начало плавного удлинённого хвоста (~18 финальных капель)
+    const rDecStart = (order.length - decDrops) / Math.max(1, order.length - 1);
 
     for (let rank = 0; rank < order.length; rank++) {
       const r = rank / Math.max(1, order.length - 1);
       let lGap;
 
       if (r < rAccEnd) {
-        // Ускоренное схлопывание пауз от стартовых 0.22с к пику
+        // Ускоренное схлопывание пауз от стартовых 0.24с к пику
         const u = r / rAccEnd;
         const ease = 1 - Math.pow(1 - u, 1.8);
         lGap = gapStart - (gapStart - gapPeak) * ease;
@@ -668,9 +693,9 @@
         const wave = Math.sin(u * Math.PI) * 0.002;
         lGap = gapPeak - wave;
       } else {
-        // Плавный и удлинённый хвост затухания к финалу этапа
-        const u = (r - rDecStart) / (1 - rDecStart);
-        const ease = Math.pow(u, 1.50);
+        // Прогрессирующее замедление пауз хвоста: от 0.04с до ровно 0.85с между предпоследней и последней
+        const u = (rank - (order.length - decDrops)) / Math.max(1, (order.length - 2) - (order.length - decDrops));
+        const ease = Math.pow(Math.min(1.0, Math.max(0.0, u)), 2.0);
         lGap = gapPeak + (gapEnd - gapPeak) * ease;
       }
 
@@ -679,30 +704,28 @@
     }
 
     // 2. Появление капель на поверхности полотна (Этап 2):
-    // Время появления капель увеличено и плавно распределено (0.17с – 6.0с):
-    // капли не забивают экран всеми 92 точками одновременно!
-    // До 1.30с спокойно появляются первые ~8-10 капель, задавая чистую атмосферу.
-    // Последующие капли зарождаются органично по мере вылета предыдущих: в любой момент
-    // на экране находится не более ~20-25 капель.
-    // Каждая капля гарантированно лежит на полотне не менее 0.38с после полного формирования.
+    // Единый непрерывный поток без искусственных «этапов» и замираний:
+    // Капли непрерывно проступают на холсте одна за другой в плавном органичном ритме.
+    // Каждая капля успевает спокойно полежать и подышать натяжением на полотне (~1.2-1.5с),
+    // и затем плавно улетает в букву, пока вокруг неё продолжают непрерывно зарождаться новые точки!
     const birthTimes = [];
-    const leadStart = 1.15;
-    const leadEnd = 0.82;
-    const minBirthGap = 0.02;
-    const emergeDur = 0.42;
+    const emergeDur = 0.32;
     const minRestTime = 0.38;
+    const leadStart = 1.85;
+    const leadPeak = 0.82;
 
-    let lastBirth = 0.15;
+    let lastBirth = 0.20;
     for (let rank = 0; rank < order.length; rank++) {
       const r = rank / Math.max(1, order.length - 1);
-      const leadTime = leadStart - r * (leadStart - leadEnd);
+      const leadTime = leadStart - Math.pow(r, 0.65) * (leadStart - leadPeak);
       const maxAllowedBirth = launchTimes[rank] - (emergeDur + minRestTime);
       let b = Math.min(launchTimes[rank] - leadTime, maxAllowedBirth);
-      b = Math.max(lastBirth + minBirthGap, b);
+      b = Math.max(lastBirth + 0.04, b);
       birthTimes.push(b);
       lastBirth = b;
     }
 
+    let maxAbsorbEnd = 0;
     for (let rank = 0; rank < order.length; rank++) {
       const idx = order[rank];
       const d = drops[idx];
@@ -711,7 +734,14 @@
       const tBirth = birthTimes[rank];
       const tLaunch = launchTimes[rank];
 
-      const flightDur = (0.50 + Math.random() * 0.12) * (0.80 + d.radial * 0.30);
+      // Живая физика инерции и разнообразия скоростей:
+      // Каждая капля имеет свою массу и темп: маленькие резвее, крупные увесистее с выраженным разгоном.
+      // Достаточное время полёта (~0.50-0.82с) даёт глазу чётко увидеть само ускорение.
+      const dist = Math.hypot(d.sx - d.ax, d.sy - d.ay);
+      const massFactor = ((d.rDropNorm || 0.5) - 0.5) * 0.20;
+      const distFactor = Math.min(0.20, (dist / 600) * 0.20);
+      const randFactor = (Math.random() - 0.5) * 0.16;
+      const flightDur = Math.max(0.50, Math.min(0.82, 0.62 + massFactor + distFactor + randFactor));
       const flightEase = flightEases[rank % flightEases.length];
 
       // В момент касания штриха вся кинетическая энергия полёта мгновенно переходит в растекание
@@ -721,10 +751,15 @@
       let absorbEase = absorbEases[rank % absorbEases.length];
 
       if (normRank > rDecStart) {
-        // Для капель удлинённого хвоста линии букв заполняются ещё плавнее и медленнее (до ~4.0с)
+        // Линии букв заполняются плавно и естественно, без искусственного 4-секундного затягивания
         const tailU = (normRank - rDecStart) / (1 - rDecStart);
-        absorbDur = baseAbsorb * (1.0 + Math.pow(tailU, 0.80) * 2.8);
-        absorbEase = tailU > 0.35 ? 'power3.out' : 'power2.out'; // бесшовный переход в глубокое замедление
+        absorbDur = baseAbsorb * (1.0 + Math.pow(tailU, 0.80) * 0.35);
+        absorbEase = 'power2.out';
+      }
+
+      const tAbsorbEnd = tAbsorbStart + absorbDur;
+      if (tAbsorbEnd > maxAbsorbEnd) {
+        maxAbsorbEnd = tAbsorbEnd;
       }
 
       mainTimeline.to(d, {
@@ -754,6 +789,13 @@
         ease: 'sine.inOut'
       }, tAbsorbStart + absorbDur * 0.35);
     }
+
+    // Моментальная готовность курсора: активируем курсор точно в момент завершения растекания букв,
+    // сводя паузу к абсолютному минимуму без мёртвого ожидания
+    mainTimeline.call(() => {
+      setCursorEnabled(true);
+    }, null, maxAbsorbEnd);
+
     mainTimeline.progress(progress);
     if (progress >= 0.999) {
       setCursorEnabled(true);
@@ -1053,16 +1095,16 @@
         const tanY = cubicBezierTangent(d.sy, d.cy1, d.cy2, d.ay, f);
         const tanLen = Math.hypot(tanX, tanY) || 1;
         const flightBell = Math.sin(Math.pow(f, 0.65) * Math.PI);
-        const stretchFlight = Math.min(0.50, (0.12 + vFlight * 0.42) * flightBell);
+        const stretchFlight = Math.min(0.68, (0.16 + vFlight * 0.52) * flightBell);
         targetSX = (tanX / tanLen) * stretchFlight;
         targetSY = (tanY / tanLen) * stretchFlight;
-      } else if (abs >= 0.001 && abs < 0.999) {
-        const flowStretch = Math.min(0.36, (0.06 + vAbs * 0.22)) * Math.pow(1.0 - abs, 0.75);
+      } else if (abs >= 0.001) {
+        const flowStretch = Math.max(0.015, Math.min(0.36, (0.06 + vAbs * 0.22)) * Math.pow(1.0 - abs, 0.75));
         targetSX = dirX * flowStretch;
         targetSY = dirY * flowStretch;
       }
 
-      const stretchEase = 1 - Math.pow(0.72, s);
+      const stretchEase = 1 - Math.pow(0.52, s);
       d.stretchX += (targetSX - d.stretchX) * stretchEase;
       d.stretchY += (targetSY - d.stretchY) * stretchEase;
 
