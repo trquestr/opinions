@@ -47,7 +47,7 @@
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   const MAX_DROPS = 108;
-  const MAX_CURSOR_DOTS = 128;
+  const MAX_CURSOR_DOTS = 256;
 
   // ==========================================================================
   // GLSL ШЕЙДЕРЫ (WebGL2)
@@ -132,6 +132,7 @@
 
     void main() {
       vec2 p = vec2(gl_FragCoord.x / u_dpr, u_res.y - gl_FragCoord.y / u_dpr);
+      float aa = 0.7 / u_dpr;
 
       // dCores объединяет сами круглые капли друг с другом через жидкий метаболл smin,
       // а dStrokes хранит вытекающие из капель штрихи букв с живой флюидной кромкой по граням
@@ -200,6 +201,7 @@
 
       // Скрытые точки под курсором (если курсор есть на странице)
       float dCursor = 1e5;
+      float rCursor = 0.0;
       if (u_cursorCount > 0 &&
           p.x >= u_cursorBBox.x && p.x <= u_cursorBBox.z &&
           p.y >= u_cursorBBox.y && p.y <= u_cursorBBox.w) {
@@ -210,14 +212,26 @@
           float stretch = cd.w;
           vec2 c = cd.xy;
 
-          float dDot = sdDroplet(p, c, u_cursorDir, r, stretch * 0.65);
+          // Быстрое пространственное отсечение далеких точек для высокой производительности и плавности
+          vec2 dp = p - c;
+          float limit = r * (1.0 + stretch) + 20.0;
+          if (abs(dp.x) > limit || abs(dp.y) > limit) continue;
+
+          // Субпиксельное затухание max(0.0, aa - r) гарантирует полное и непрерывное исчезновение капли в 0%
+          float dDot = sdDroplet(p, c, u_cursorDir, r, stretch * 0.65) + max(0.0, aa - r);
+          float w = clamp(0.5 - 0.5 * (dDot - dCursor) / 13.0, 0.0, 1.0);
           dCursor = smin(dCursor, dDot, 13.0);
+          rCursor = mix(rCursor, r, w);
         }
       }
 
-      float d = smin(dText, dCursor, 6.5);
+      // Адаптивный флюидный метаболл между буквой и каплями курсора:
+      // пока капля крупная, kGoo = 6.5 дает сочный жидкий перешеек;
+      // когда капля растворяется к 0, kGoo непрерывно уменьшается до 0,
+      // поэтому капля плавно и бесследно втекает в букву без остаточного бугорка!
+      float kGoo = max(0.0, min(6.5, rCursor * 1.3));
+      float d = smin(dText, dCursor, kGoo);
 
-      float aa = 0.7 / u_dpr;
       float ink = 1.0 - smoothstep(-aa, aa, d);
       vec3 col = mix(vec3(1.0), vec3(0.0), ink);
       outColor = vec4(col, 1.0);
@@ -1005,7 +1019,7 @@
     for (let i = 0; i < fieldCount; i++) {
       FSF[i] = 0.7 + Math.random() * 0.6;
       FGS[i] = 0.06 + Math.random() * 0.12;
-      FSS[i] = 0.10 + Math.random() * 0.10;
+      FSS[i] = 0.13 + Math.random() * 0.08;
     }
 
     binCols = Math.ceil((width + PAD * 2) / BIN);
@@ -1291,14 +1305,23 @@
         }
       }
 
-      const ease = FT[i] > FR[i] ? FGS[i] : FSS[i];
-      FR[i] += (FT[i] - FR[i]) * (1 - Math.pow(1 - ease, s));
+      if (FT[i] === 0) {
+        // Ускоренное естественное растворение капли на хвосте затухания,
+        // чтобы капли не залипали и не ползли субпиксельно по 0.01px
+        const shrinkEase = FSS[i] + Math.max(0, (2.0 - FR[i]) * 0.08);
+        const decayStep = (1 - Math.pow(1 - shrinkEase, s));
+        const delta = Math.max(FR[i] * decayStep, 0.04 * s);
+        FR[i] = Math.max(0, FR[i] - delta);
+      } else {
+        const ease = FT[i] > FR[i] ? FGS[i] : FSS[i];
+        FR[i] += (FT[i] - FR[i]) * (1 - Math.pow(1 - ease, s));
+      }
 
       FDX[i] += (tx - FDX[i]) * pEase;
       FDY[i] += (ty - FDY[i]) * pEase;
       FST[i] += (targetStretch - FST[i]) * pEase;
 
-      if (FR[i] < 0.08 && FT[i] === 0) {
+      if (FR[i] <= 0.02 && FT[i] === 0) {
         FR[i] = 0;
         FDX[i] = 0;
         FDY[i] = 0;
@@ -1312,12 +1335,26 @@
     }
     activeField.length = writeIdx;
 
-    // Отправляем в шейдер все активные точки под курсором (только если курсор активирован)
+    // Отправляем в шейдер активные точки под курсором (только если курсор активирован)
     let cursorSendCount = 0;
     let cMinX = 1e5, cMinY = 1e5, cMaxX = -1e5, cMaxY = -1e5;
-    if (cursorEnabled) {
-      const startIdx = Math.max(0, activeField.length - MAX_CURSOR_DOTS);
-      for (let n = startIdx; n < activeField.length; n++) {
+    if (cursorEnabled && activeField.length > 0) {
+      if (activeField.length > MAX_CURSOR_DOTS) {
+        // Приоритет самым заметным каплям: крупные капли никогда не отсекаются внезапно
+        activeField.sort((a, b) => FR[b] - FR[a]);
+        for (let n = MAX_CURSOR_DOTS; n < activeField.length; n++) {
+          const i = activeField[n];
+          FR[i] = 0;
+          FDX[i] = 0;
+          FDY[i] = 0;
+          FST[i] = 0;
+          FIN[i] = 0;
+          FE[i] = 0;
+        }
+        activeField.length = MAX_CURSOR_DOTS;
+      }
+
+      for (let n = 0; n < activeField.length; n++) {
         const i = activeField[n];
         const cxDot = FX[i] + FDX[i];
         const cyDot = FY[i] + FDY[i];
