@@ -155,18 +155,18 @@
 
           vec4 core = vec4(0.0);
           vec2 dir = vec2(1.0, 0.0);
+          float dDrop = 1e5;
           if (rCore > 0.01) {
             core = u_dropCore[i];
             vec2 sVec = core.zw;
             float stretch = length(sVec);
             dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
+            dDrop = sdDroplet(p, core.xy, dir, rCore, stretch);
 
-            // Капли в полёте объединяются в dCores; после приземления капля формирует
-            // единый органичный контур со своим штрихом, исключая наложение и паразитные бугорки
+            // Капли в полёте объединяются в dCores
             if (absorb <= 0.001) {
-              float dCore = sdDroplet(p, core.xy, dir, rCore, stretch);
               float kCore = min(9.5, rCore * 1.45);
-              dCores = smin(dCores, dCore, kCore);
+              dCores = smin(dCores, dDrop, kCore);
             }
           }
 
@@ -186,15 +186,16 @@
 
               if (rCore > 0.01) {
                 // Плавный вогнутый раструб хвостика капли (concave flare):
-                // спереди — круглая выпуклая форма капли, а сзади — хвостик плавно изгибается
-                // внутрь, касаясь равномерного штриха буквы без боковых бугорков
+                // сама капля всегда сохраняет полную круглую форму (dDrop), а сзади
+                // от неё формируется вогнутый сужающийся перешеек без раздувания и бугорков
                 float distFromB = (1.0 - h) * len;
-                float tailLen = max(0.001, min(len, rCore * 3.4));
+                float tailLen = max(0.001, rCore * 3.2);
                 float t = clamp(distFromB / tailLen, 0.0, 1.0);
                 float u = 1.0 - t;
                 float flare = u * u * u;
                 float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
-                dOwn = dStrokeRaw - localR;
+                float dFlaredStroke = dStrokeRaw - localR;
+                dOwn = min(dDrop, dFlaredStroke);
               } else {
                 dOwn = dStrokeRaw - u_strokeR;
               }
@@ -203,12 +204,13 @@
 
               if (rCore > 0.01) {
                 float distFromHead = max(0.0, -dot(p - core.xy, dir));
-                float tailLen = max(0.001, min(2.0 * seg.w * u_yahArcR, rCore * 3.4));
+                float tailLen = max(0.001, rCore * 3.2);
                 float t = clamp(distFromHead / tailLen, 0.0, 1.0);
                 float u = 1.0 - t;
                 float flare = u * u * u;
                 float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
-                dOwn = dStrokeRaw - localR;
+                float dFlaredStroke = dStrokeRaw - localR;
+                dOwn = min(dDrop, dFlaredStroke);
               } else {
                 dOwn = dStrokeRaw - u_strokeR;
               }
