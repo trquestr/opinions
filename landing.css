@@ -23,6 +23,7 @@ html, body {
   min-height: 160px;
   display: grid;
   place-items: center;
+  touch-action: none;
 }
 
 .gl-layer {
@@ -32,6 +33,7 @@ html, body {
   height: 100%;
   display: block;
   visibility: hidden;
+  touch-action: none;
 }
 
 /* The heading remains readable before scripts load or when WebGL is unavailable. */
