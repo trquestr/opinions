@@ -46,7 +46,7 @@
   let height = window.innerHeight;
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-  const MAX_DROPS = 96;
+  const MAX_DROPS = 108;
   const MAX_CURSOR_DOTS = 128;
 
   // ==========================================================================
@@ -173,43 +173,18 @@
             vec2 pa = p - seg.xy;
             vec2 ba = seg.zw - seg.xy;
             float len2 = dot(ba, ba);
-            float len = sqrt(max(len2, 0.0001));
-            h = len2 > 0.0001 ? clamp(dot(pa, ba) / len2, 0.0, 1.0) : 0.0;
+            float h = len2 > 0.0001 ? clamp(dot(pa, ba) / len2, 0.0, 1.0) : 0.0;
             vec2 closest = seg.xy + ba * h;
             dStrokeRaw = length(p - closest);
-            sCoord = h * len;
           } else {
             dStrokeRaw = sdArc(p, seg.xy, u_yahArcR, seg.z, seg.w);
-            vec2 dArcVec = p - seg.xy;
-            float ang = atan(dArcVec.y, dArcVec.x);
-            float delta = atan(sin(ang - seg.z), cos(ang - seg.z));
-            sCoord = abs(delta) * u_yahArcR;
-            h = seg.w > 0.001 ? clamp(0.5 + delta / max(0.001, 2.0 * seg.w), 0.0, 1.0) : 0.0;
           }
 
-          float edgeFluid = 0.0;
-          if (wet > 0.001 && dStrokeRaw < u_strokeR + 12.0) {
-            float phase = float(i) * 1.73;
-            // Огибающая sin(h * PI) строго обнуляет флюидное утолщение на обоих концах участка (h = 0 и h = 1),
-            // поэтому на стыках двух участков толщина всегда совпадает с точностью до 0.0px (без ступенек!)
-            float envelope = sin(h * 3.14159265);
-            float w1 = 0.5 + 0.5 * sin(sCoord * 0.13 - u_time * 2.4 + phase);
-            float w2 = 0.5 + 0.5 * sin(sCoord * 0.23 + u_time * 1.7 - phase * 1.2);
-            float bead = pow(w1 * 0.65 + w2 * 0.35, 1.8);
+          // Строгая равномерная толщина штрихов без утолщений, наплывов и раздуваний
+          float dStroke = dStrokeRaw - u_strokeR;
+          float dOwn = min(dCore, dStroke);
 
-            edgeFluid = wet * envelope * (0.22 + bead * 0.95);
-          }
-
-          float dStroke = dStrokeRaw - (u_strokeR + edgeFluid);
-          float dOwn = dStroke;
-
-          if (rCore > 0.01) {
-            // Плавный каплевидный мениск перетекания круглой капли в тонкую линию буквы
-            float kNeck = rCore * 1.38 * (1.0 - absorb * 0.28);
-            dOwn = smin(dCore, dStroke, kNeck);
-          }
-
-          // Чистый min без smin между коллинеарными штрихами, чтобы на стыках не возникало утолщения smin(d, d)
+          // Чистый min без smin между штрихами
           dStrokes = min(dStrokes, dOwn);
         }
       }
@@ -330,6 +305,12 @@
     strokeR = Math.max(0.95, H * 0.0095);
     const tracking = H * 0.58;
 
+    // Адаптивный масштаб размера точек под экраны десктопа, планшета и мобильного:
+    // На Desktop (H=134) dotScale = 1.0 (3.2..12.0px)
+    // На Tablet (H~90)   dotScale ≈ 0.79 (2.5..9.5px)
+    // На Mobile (H~47)   dotScale ≈ 0.54 (1.7..6.5px)
+    const dotScale = Math.max(0.48, Math.min(1.0, 0.45 + 0.55 * Math.pow((H - 35) / (134 - 35), 0.85)));
+
     const letterSpecs = [
       { ch: 'М', w: 0.88 },
       { ch: 'Н', w: 0.68 },
@@ -404,25 +385,25 @@
       const yM = topY + H * 0.50;
 
       if (ch === 'М') {
-        addStroke(xL, yB, xL, yT, 4, li);
-        addStroke(xL, yT, xM, yB - H * 0.14, 3, li);
-        addStroke(xM, yB - H * 0.14, xR, yT, 3, li);
-        addStroke(xR, yT, xR, yB, 4, li);
+        addStroke(xL, yB, xL, yT, 5, li);
+        addStroke(xL, yT, xM, yB - H * 0.14, 4, li);
+        addStroke(xM, yB - H * 0.14, xR, yT, 4, li);
+        addStroke(xR, yT, xR, yB, 5, li);
       } else if (ch === 'Н') {
-        addStroke(xL, yT, xL, yB, 4, li);
-        addStroke(xR, yT, xR, yB, 4, li);
-        addStroke(xL, yM, xR, yM, 2, li);
+        addStroke(xL, yT, xL, yB, 5, li);
+        addStroke(xR, yT, xR, yB, 5, li);
+        addStroke(xL, yM, xR, yM, 3, li);
       } else if (ch === 'Е') {
-        addStroke(xL, yT, xL, yB, 4, li);
-        addStroke(xL, yT, xR, yT, 2, li);
-        addStroke(xL, yM, xL + lw * 0.86, yM, 2, li);
-        addStroke(xL, yB, xR, yB, 2, li);
+        addStroke(xL, yT, xL, yB, 5, li);
+        addStroke(xL, yT, xR, yT, 3, li);
+        addStroke(xL, yM, xL + lw * 0.86, yM, 3, li);
+        addStroke(xL, yB, xR, yB, 3, li);
       } else if (ch === 'И') {
-        addStroke(xL, yT, xL, yB, 4, li);
-        addStroke(xL, yB, xR, yT, 4, li);
-        addStroke(xR, yT, xR, yB, 4, li);
+        addStroke(xL, yT, xL, yB, 5, li);
+        addStroke(xL, yB, xR, yT, 5, li);
+        addStroke(xR, yT, xR, yB, 5, li);
       } else if (ch === 'Я') {
-        addStroke(xR, yT, xR, yB, 4, li);
+        addStroke(xR, yT, xR, yB, 5, li);
 
         const bowlH = H * 0.54;
         yahArcR = bowlH * 0.5;
@@ -430,8 +411,8 @@
         const arcCy = yT + yahArcR;
 
         // Верхняя и нижняя перекладины головки «Я»
-        addStroke(arcCx, yT, xR, yT, 2, li);
-        addStroke(arcCx, yT + bowlH, xR, yT + bowlH, 2, li);
+        addStroke(arcCx, yT, xR, yT, 3, li);
+        addStroke(arcCx, yT + bowlH, xR, yT + bowlH, 3, li);
 
         // Полукруглая дуга «Я»: 4 четверти дуги (капли входят с разных сторон и сходятся навстречу)
         const arcGroup = strokeGroupCounter++;
@@ -461,16 +442,16 @@
         });
 
         // Диагональная ножка «Я»
-        addStroke(arcCx + H * 0.04, yT + bowlH, xL, yB, 3, li);
+        addStroke(arcCx + H * 0.04, yT + bowlH, xL, yB, 4, li);
       }
 
       curX += lw + tracking;
     }
 
     // Минимальная дистанция появления от конечной точки штриха (буквы):
-    // точки не должны появляться в упор к буквам
-    const minSpawnDist = Math.max(150, Math.min(Math.min(width, height) * 0.30, 240));
-    const margin = 28;
+    // точки не должны появляться в упор к буквам, адаптируясь под экран
+    const minSpawnDist = Math.max(55, Math.min(Math.min(width, height) * 0.26, 240));
+    const margin = Math.max(16, Math.min(28, width * 0.04));
 
     drops = [];
 
@@ -534,11 +515,11 @@
       const sizeRoll = Math.random();
       let rDrop;
       if (sizeRoll < 0.45) {
-        rDrop = 3.2 + Math.random() * 2.2;  // 3.2..5.4px
+        rDrop = (3.2 + Math.random() * 2.2) * dotScale;  // 3.2..5.4px * dotScale
       } else if (sizeRoll < 0.80) {
-        rDrop = 5.6 + Math.random() * 2.6;  // 5.6..8.2px
+        rDrop = (5.6 + Math.random() * 2.6) * dotScale;  // 5.6..8.2px * dotScale
       } else {
-        rDrop = 8.4 + Math.random() * 3.6;  // 8.4..12.0px
+        rDrop = (8.4 + Math.random() * 3.6) * dotScale;  // 8.4..12.0px * dotScale
       }
 
       drops.push({
@@ -562,6 +543,7 @@
         flowUx: ux,
         flowUy: uy,
         rDrop,
+        rDropNorm: rDrop / (13.6 * dotScale),
         radial,
         seed: i * 2.39996 + Math.random() * 10.0,
         // Анимируемые через GSAP параметры:
@@ -658,20 +640,67 @@
     const flightEases = ['power1.in', 'sine.in'];
     const absorbEases = ['power2.out', 'power3.out'];
 
-    // Профиль интервалов между стартами движения капель (для ~71 капли):
-    // в начале интервал больше (~0.14с), затем темп стремительно нарастает (интервал сжимается до ~0.042с),
-    // а к финалу, когда буквы уже активно выливаются и растекаются, темп плавно смягчается
+    // 1. Старт полёта капель (Этап 3):
+    // Динамический профиль (согласно графику распределения):
+    // 1) Плавный старт с отметки 1.30с с паузы ~0.22с и уверенный разгон к пику (~15 капель)
+    // 2) Насыщенный флюидный каскад пика: ~63 капли с комфортным тактом (~0.036-0.038с, ~26-27 капель/сек)
+    // 3) Компактный выразительный хвост: лишь ~14 финальных капель с нарастанием пауз до ~0.25с
     const launchTimes = [];
-    let curLaunch = 0.50;
+    let curLaunch = 1.30;
+    const gapStart = 0.22;
+    const gapPeak = 0.038;
+    const gapEnd = 0.34;
+    const rAccEnd = 0.16;    // граница завершения разгона (~15 капель)
+    const rDecStart = 0.80;  // начало плавного удлинённого хвоста (~18 финальных капель)
+
     for (let rank = 0; rank < order.length; rank++) {
-      if (rank === 0) {
-        launchTimes.push(curLaunch);
+      const r = rank / Math.max(1, order.length - 1);
+      let lGap;
+
+      if (r < rAccEnd) {
+        // Ускоренное схлопывание пауз от стартовых 0.22с к пику
+        const u = r / rAccEnd;
+        const ease = 1 - Math.pow(1 - u, 1.8);
+        lGap = gapStart - (gapStart - gapPeak) * ease;
+      } else if (r <= rDecStart) {
+        // Комфортный насыщенный каскад пика: читаемый полёт капель без суетливой пулемётной дрожи
+        const u = (r - rAccEnd) / (rDecStart - rAccEnd);
+        const wave = Math.sin(u * Math.PI) * 0.002;
+        lGap = gapPeak - wave;
       } else {
-        const r = (rank - 1) / Math.max(1, order.length - 2);
-        const gap = 0.12 * Math.pow(1 - r, 2.5) + 0.018 + 0.024 * Math.pow(r, 2.0);
-        curLaunch += gap;
-        launchTimes.push(curLaunch);
+        // Плавный и удлинённый хвост затухания к финалу этапа
+        const u = (r - rDecStart) / (1 - rDecStart);
+        const ease = Math.pow(u, 1.50);
+        lGap = gapPeak + (gapEnd - gapPeak) * ease;
       }
+
+      launchTimes.push(curLaunch);
+      curLaunch += lGap;
+    }
+
+    // 2. Появление капель на поверхности полотна (Этап 2):
+    // Время появления капель увеличено и плавно распределено (0.17с – 6.0с):
+    // капли не забивают экран всеми 92 точками одновременно!
+    // До 1.30с спокойно появляются первые ~8-10 капель, задавая чистую атмосферу.
+    // Последующие капли зарождаются органично по мере вылета предыдущих: в любой момент
+    // на экране находится не более ~20-25 капель.
+    // Каждая капля гарантированно лежит на полотне не менее 0.38с после полного формирования.
+    const birthTimes = [];
+    const leadStart = 1.15;
+    const leadEnd = 0.82;
+    const minBirthGap = 0.02;
+    const emergeDur = 0.42;
+    const minRestTime = 0.38;
+
+    let lastBirth = 0.15;
+    for (let rank = 0; rank < order.length; rank++) {
+      const r = rank / Math.max(1, order.length - 1);
+      const leadTime = leadStart - r * (leadStart - leadEnd);
+      const maxAllowedBirth = launchTimes[rank] - (emergeDur + minRestTime);
+      let b = Math.min(launchTimes[rank] - leadTime, maxAllowedBirth);
+      b = Math.max(lastBirth + minBirthGap, b);
+      birthTimes.push(b);
+      lastBirth = b;
     }
 
     for (let rank = 0; rank < order.length; rank++) {
@@ -679,21 +708,24 @@
       const d = drops[idx];
       const normRank = rank / Math.max(1, order.length - 1);
 
+      const tBirth = birthTimes[rank];
       const tLaunch = launchTimes[rank];
-
-      // Время ожидания капли на месте до старта: от ~0.44с до ~0.28с
-      // (капли не висят подолгу, а всплывают, коротко парят и дышат, после чего подхватываются потоком)
-      const hoverDuration = 0.44 - normRank * 0.16;
-      const emergeDur = 0.38;
-      const tBirth = Math.max(0.10, tLaunch - hoverDuration);
 
       const flightDur = (0.50 + Math.random() * 0.12) * (0.80 + d.radial * 0.30);
       const flightEase = flightEases[rank % flightEases.length];
 
       // В момент касания штриха вся кинетическая энергия полёта мгновенно переходит в растекание
       const tAbsorbStart = tLaunch + flightDur;
-      const absorbDur = (0.95 + (d.rDrop / 13.6) * 0.25 + Math.random() * 0.18) * (0.95 - normRank * 0.15);
-      const absorbEase = absorbEases[rank % absorbEases.length];
+      const baseAbsorb = 0.95 + (d.rDropNorm || (d.rDrop / 13.6)) * 0.22 + Math.random() * 0.14;
+      let absorbDur = baseAbsorb;
+      let absorbEase = absorbEases[rank % absorbEases.length];
+
+      if (normRank > rDecStart) {
+        // Для капель удлинённого хвоста линии букв заполняются ещё плавнее и медленнее (до ~4.0с)
+        const tailU = (normRank - rDecStart) / (1 - rDecStart);
+        absorbDur = baseAbsorb * (1.0 + Math.pow(tailU, 0.80) * 2.8);
+        absorbEase = tailU > 0.35 ? 'power3.out' : 'power2.out'; // бесшовный переход в глубокое замедление
+      }
 
       mainTimeline.to(d, {
         emerge: 1,
@@ -715,11 +747,12 @@
 
       // Пока участок буквы растекается и сразу после его появления, его грани остаются «мокрыми»
       // и живо переливаются поверхностным натяжением (wet: 1 -> 0), а в финале стабилизируются в чёткий штрих
+      const wetDur = Math.max(1.20, absorbDur * 0.70);
       mainTimeline.to(d, {
         wet: 0,
-        duration: 1.20,
+        duration: wetDur,
         ease: 'sine.inOut'
-      }, tAbsorbStart + absorbDur * 0.50);
+      }, tAbsorbStart + absorbDur * 0.35);
     }
     mainTimeline.progress(progress);
     if (progress >= 0.999) {
@@ -835,6 +868,13 @@
   }
 
   function buildCursorField() {
+    const H = Math.max(1, Math.min(width * 0.12, (width - 40) / 7.02, height * 0.28, 134));
+    const dotScale = Math.max(0.50, Math.min(1.0, 0.45 + 0.55 * Math.pow((H - 35) / (134 - 35), 0.85)));
+    CURSOR_CFG.maxRadius = Math.max(6, Math.round(12 * dotScale));
+    CURSOR_CFG.fieldRadius = Math.max(28, Math.round(42 * Math.max(0.70, dotScale)));
+    CURSOR_CFG.clickRadius = Math.max(38, Math.round(55 * Math.max(0.70, dotScale)));
+    CURSOR_CFG.minDist = Math.max(13, 18.8 * Math.max(0.70, dotScale));
+
     const rMin = CURSOR_CFG.minDist;
     const cell = rMin / Math.SQRT2;
     const gw = Math.ceil((width + PAD * 2) / cell);
@@ -985,21 +1025,16 @@
         }
       }
 
-      // Тонкое органическое микродвижение (парение капли на полотне в ожидании старта полёта)
-      let hoverX = 0;
-      let hoverY = 0;
-      let hoverBreath = 1.0;
-      if (d.emerge > 0.01 && f < 0.999) {
-        const hoverWeight = d.emerge * Math.max(0, 1.0 - f * 2.2);
-        const tHover = now * 0.0016 + d.seed;
-        hoverX = Math.sin(tHover * 1.5) * 2.2 * hoverWeight;
-        hoverY = Math.cos(tHover * 1.2 + 1.3) * 2.2 * hoverWeight;
-        hoverBreath = 1.0 + Math.sin(now * 0.003 + d.seed * 2.0) * 0.04 * hoverWeight;
+      // Капля на поверхности полотна: координаты строго зафиксированы на месте (без парения и дрейфа)
+      let surfaceTension = 1.0;
+      if (d.emerge > 0.01 && f < 0.001) {
+        // Едва уловимое поверхностное натяжение покоящейся капли жидкости (без смещения координат)
+        surfaceTension = 1.0 + Math.sin(now * 0.0022 + d.seed * 2.0) * 0.012;
       }
 
-      // Текущий центр круглой капли (плавно переходит из подлёта в скольжение вдоль штриха без остановки)
-      const cx = baseX + glideX + hoverX;
-      const cy = baseY + glideY + hoverY;
+      // Текущий центр капли (на поверхности строго d.sx, d.sy, в полёте — прямая траектория)
+      const cx = baseX + glideX;
+      const cy = baseY + glideY;
 
       // Скорость полёта и скорость растекания по букве
       const vFlight = Math.max(0, f - d.prevFlight) * 60;
@@ -1007,16 +1042,9 @@
       d.prevFlight = f;
       d.prevAbs = abs;
 
-      // Импульс упругого гидродинамического удара капли о штрих буквы:
-      // при ударе капля слегка плющится и расширяется в радиусе (+30%), а затем перетекает в штрих
-      const impactPulse = (abs > 0.0001 && abs < 0.40)
-        ? Math.sin(Math.min(1.0, abs / 0.30) * Math.PI) * Math.exp(-abs * 4.2)
-        : 0;
-
       // Плавное овально-каплевидное вытягивание:
       // 1) В полёте — капля вытягивается вдоль траектории полёта с нарастанием к моменту удара
-      // 2) При ударе и растекании — капля сохраняет инерционное вытягивание вдоль штриха буквы,
-      //    выглядя как живая стремительная струя чернил, а к концу штриха округляется и растворяется
+      // 2) При ударе и растекании — капля мягко передаёт кинетическую энергию в штрих без раздувания
       let targetSX = 0;
       let targetSY = 0;
 
@@ -1029,7 +1057,7 @@
         targetSX = (tanX / tanLen) * stretchFlight;
         targetSY = (tanY / tanLen) * stretchFlight;
       } else if (abs >= 0.001 && abs < 0.999) {
-        const flowStretch = Math.min(0.44, (0.08 + vAbs * 0.28)) * Math.pow(1.0 - abs, 0.75);
+        const flowStretch = Math.min(0.36, (0.06 + vAbs * 0.22)) * Math.pow(1.0 - abs, 0.75);
         targetSX = dirX * flowStretch;
         targetSY = dirY * flowStretch;
       }
@@ -1038,8 +1066,8 @@
       d.stretchX += (targetSX - d.stretchX) * stretchEase;
       d.stretchY += (targetSY - d.stretchY) * stretchEase;
 
-      // Радиус капли: упругий всплеск (impactPulse) при касании буквы, плавно переходящий в 0 к концу участка
-      const rCore = d.rDrop * d.emerge * Math.max(0, 1.0 - abs) * (1.0 + impactPulse * 0.32) * hoverBreath;
+      // Радиус капли: плавно переходит в 0 к концу участка без искусственного вздутия штриха
+      const rCore = d.rDrop * d.emerge * Math.max(0, 1.0 - abs) * surfaceTension;
 
       dropCoreData[i * 4] = cx;
       dropCoreData[i * 4 + 1] = cy;
@@ -1063,8 +1091,7 @@
         dropSegData[i * 4 + 3] = da;
       }
 
-      // Капиллярная флюидность свежих чернил слегка возбуждается от удара капли
-      const currentWet = Math.min(1.6, d.wet * (1.0 + impactPulse * 0.75));
+      const currentWet = d.wet;
 
       dropParamsData[i * 4] = rCore;
       dropParamsData[i * 4 + 1] = abs;
