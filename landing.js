@@ -577,17 +577,46 @@
     }
   }
 
+  let cursorEnabled = false;
+  let lastPointerX = -9999;
+  let lastPointerY = -9999;
+
+  function setCursorEnabled(enabled) {
+    cursorEnabled = !!enabled;
+    if (cursorEnabled) {
+      hero.classList.add('cursor-ready');
+      if (lastPointerX >= 0 && lastPointerY >= 0 && !document.hidden) {
+        pointer.moveTo(lastPointerX, lastPointerY);
+      }
+      scheduleRender();
+    } else {
+      hero.classList.remove('cursor-ready');
+      if (typeof pointer !== 'undefined') pointer.leave();
+      if (typeof FIN !== 'undefined' && FIN) FIN.fill(0);
+      if (typeof FR !== 'undefined' && FR) FR.fill(0);
+      if (typeof FT !== 'undefined' && FT) FT.fill(0);
+      if (typeof FDX !== 'undefined' && FDX) FDX.fill(0);
+      if (typeof FDY !== 'undefined' && FDY) FDY.fill(0);
+      if (typeof FST !== 'undefined' && FST) FST.fill(0);
+      if (typeof activeField !== 'undefined') activeField.length = 0;
+      if (typeof cursorWaves !== 'undefined') cursorWaves.length = 0;
+      scheduleRender();
+    }
+  }
+
   function playGsapChoreography(progress = 0) {
     if (mainTimeline) {
       mainTimeline.kill();
     }
 
+    setCursorEnabled(false);
     buildWordAndDrops();
     mainTimeline = null;
     const canAnimate = !motionPreference.matches && typeof window.gsap !== 'undefined';
     replayBtn.hidden = !canAnimate;
     if (!canAnimate) {
       for (const drop of drops) Object.assign(drop, { emerge: 1, flight: 1, absorb: 1, wet: 0, prevFlight: 1, prevAbs: 1 });
+      setCursorEnabled(true);
       return;
     }
 
@@ -600,7 +629,11 @@
       .sort((a, b) => a.score - b.score)
       .map((item) => item.i);
 
-    mainTimeline = window.gsap.timeline();
+    mainTimeline = window.gsap.timeline({
+      onComplete() {
+        setCursorEnabled(true);
+      }
+    });
 
     const flightEases = ['power1.in', 'sine.in'];
     const absorbEases = ['power2.out', 'power3.out'];
@@ -669,6 +702,9 @@
       }, tAbsorbStart + absorbDur * 0.50);
     }
     mainTimeline.progress(progress);
+    if (progress >= 0.999) {
+      setCursorEnabled(true);
+    }
     if (document.hidden) mainTimeline.pause();
   }
 
@@ -747,7 +783,7 @@
   const cursorWaves = [];
 
   function triggerCursorClick(cx, cy) {
-    if (CURSOR_CFG.clickMode !== 'shockwave') return;
+    if (!cursorEnabled || CURSOR_CFG.clickMode !== 'shockwave') return;
     const maxR = Math.max(10, CURSOR_CFG.clickRadius);
     const pw = CURSOR_CFG.clickPower;
 
@@ -1045,7 +1081,7 @@
     }
     const hasWaves = cursorWaves.length > 0;
 
-    if (pointer.inside) {
+    if (cursorEnabled && pointer.inside) {
       const x0 = Math.max(0, Math.floor((pointer.x - fr + PAD) / BIN));
       const x1 = Math.min(binCols - 1, Math.floor((pointer.x + fr + PAD) / BIN));
       const y0 = Math.max(0, Math.floor((pointer.y - fr + PAD) / BIN));
@@ -1076,7 +1112,7 @@
       const i = activeField[n];
 
       let proximity = 0;
-      if (pointer.inside) {
+      if (cursorEnabled && pointer.inside) {
         const ddx = FX[i] - pointer.x;
         const ddy = FY[i] - pointer.y;
         const d2 = ddx * ddx + ddy * ddy;
@@ -1154,28 +1190,29 @@
     }
     activeField.length = writeIdx;
 
-    // Отправляем в шейдер все активные точки (при превышении лимита — самые свежие точки прямо под курсором,
-    // без перестановки элементов в массиве, из-за которой точки раньше моргали)
+    // Отправляем в шейдер все активные точки под курсором (только если курсор активирован)
     let cursorSendCount = 0;
     let cMinX = 1e5, cMinY = 1e5, cMaxX = -1e5, cMaxY = -1e5;
-    const startIdx = Math.max(0, activeField.length - MAX_CURSOR_DOTS);
-    for (let n = startIdx; n < activeField.length; n++) {
-      const i = activeField[n];
-      const cxDot = FX[i] + FDX[i];
-      const cyDot = FY[i] + FDY[i];
-      const rDot = FR[i];
-      const padDot = rDot * (1 + FST[i]) + 32;
+    if (cursorEnabled) {
+      const startIdx = Math.max(0, activeField.length - MAX_CURSOR_DOTS);
+      for (let n = startIdx; n < activeField.length; n++) {
+        const i = activeField[n];
+        const cxDot = FX[i] + FDX[i];
+        const cyDot = FY[i] + FDY[i];
+        const rDot = FR[i];
+        const padDot = rDot * (1 + FST[i]) + 32;
 
-      if (cxDot - padDot < cMinX) cMinX = cxDot - padDot;
-      if (cyDot - padDot < cMinY) cMinY = cyDot - padDot;
-      if (cxDot + padDot > cMaxX) cMaxX = cxDot + padDot;
-      if (cyDot + padDot > cMaxY) cMaxY = cyDot + padDot;
+        if (cxDot - padDot < cMinX) cMinX = cxDot - padDot;
+        if (cyDot - padDot < cMinY) cMinY = cyDot - padDot;
+        if (cxDot + padDot > cMaxX) cMaxX = cxDot + padDot;
+        if (cyDot + padDot > cMaxY) cMaxY = cyDot + padDot;
 
-      cursorDotsData[cursorSendCount * 4] = cxDot;
-      cursorDotsData[cursorSendCount * 4 + 1] = cyDot;
-      cursorDotsData[cursorSendCount * 4 + 2] = rDot;
-      cursorDotsData[cursorSendCount * 4 + 3] = FST[i];
-      cursorSendCount++;
+        cursorDotsData[cursorSendCount * 4] = cxDot;
+        cursorDotsData[cursorSendCount * 4 + 1] = cyDot;
+        cursorDotsData[cursorSendCount * 4 + 2] = rDot;
+        cursorDotsData[cursorSendCount * 4 + 3] = FST[i];
+        cursorSendCount++;
+      }
     }
 
     gl.uniform2f(uRes, width, height);
@@ -1196,11 +1233,13 @@
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    if ((mainTimeline && mainTimeline.isActive()) || pointer.inside || activeField.length || cursorWaves.length) scheduleRender();
+    if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length))) scheduleRender();
   }
 
   window.addEventListener('pointermove', (e) => {
-    if (motionPreference.matches || e.target.closest('button')) {
+    lastPointerX = e.clientX;
+    lastPointerY = e.clientY;
+    if (!cursorEnabled || motionPreference.matches || e.target.closest('button')) {
       pointer.leave();
       return;
     }
@@ -1209,7 +1248,9 @@
   }, { passive: true });
 
   window.addEventListener('pointerdown', (e) => {
-    if (motionPreference.matches || e.target.closest('button')) {
+    lastPointerX = e.clientX;
+    lastPointerY = e.clientY;
+    if (!cursorEnabled || motionPreference.matches || e.target.closest('button')) {
       pointer.leave();
       return;
     }
@@ -1219,10 +1260,14 @@
   }, { passive: true });
 
   document.addEventListener('mouseleave', () => {
+    lastPointerX = -9999;
+    lastPointerY = -9999;
     pointer.leave();
   });
 
   window.addEventListener('blur', () => {
+    lastPointerX = -9999;
+    lastPointerY = -9999;
     pointer.leave();
   });
 
@@ -1263,6 +1308,7 @@
 
   if (replayBtn) {
     replayBtn.addEventListener('click', () => {
+      setCursorEnabled(false);
       playGsapChoreography();
       scheduleRender();
     });
