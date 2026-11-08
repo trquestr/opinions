@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Флюидный Курсор — Поле скрытых точек</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- SVG Filter для органического слияния при соприкосновении -->
+  <svg class="svg-filters" aria-hidden="true">
+    <defs>
+      <filter id="pure-black-goo" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.2" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" 
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 18 -7" result="goo" />
+      </filter>
+    </defs>
+  </svg>
+
+  <!-- Холсты -->
+  <div class="cursor-canvas-container" aria-hidden="true">
+    <canvas id="fluid-canvas" class="cursor-layer goo-active"></canvas>
+    <canvas id="debug-canvas" class="cursor-layer"></canvas>
+  </div>
+
+  <!-- Окно превью: показывает изменения параметров на виртуальном курсоре -->
+  <div class="preview-window" id="preview-window" aria-hidden="true">
+    <div class="preview-title">Превью</div>
+    <canvas id="preview-canvas" class="preview-canvas goo-active"></canvas>
+  </div>
+
+  <!-- Минималистичный интерфейс -->
+  <div class="app-layout">
+    <header class="app-header">
+      <div class="brand-title">Лаборатория движения</div>
+      <div class="header-status">
+        <span class="speed-readout" id="speed-meter">0 px/s</span>
+      </div>
+    </header>
+
+    <main class="center-content">
+      <div class="minimal-prompt">
+        <h1 class="prompt-title">Поле скрытых точек</h1>
+        <p class="prompt-desc">
+          Двигайте курсор — невидимые точки оживут и потянутся за ним.
+          Нажмите на полотно, чтобы увидеть волну. Настройте движение под себя.
+        </p>
+      </div>
+
+      <div class="test-track">
+        <div class="track-line"></div>
+        <div class="track-labels">
+          <span>Остановитесь — точки замрут</span>
+          <span>Двигайтесь — поле оживёт</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Нижняя панель управления -->
+    <footer class="app-footer">
+      <div class="controls-bar">
+        <!-- Радиус области -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-radius">Радиус поля: <strong id="val-radius">42px</strong></label>
+          <input type="range" id="slider-radius" min="10" max="140" value="42" step="2">
+        </div>
+
+        <!-- Плотность поля точек -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-density">Плотность: <strong id="val-density">2/10</strong></label>
+          <input type="range" id="slider-density" min="1" max="10" value="2" step="1">
+        </div>
+
+        <!-- Размер точек в центре -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-size">Размер: <strong id="val-size">12px</strong></label>
+          <input type="range" id="slider-size" min="1.5" max="40" value="12" step="0.5">
+        </div>
+
+        <!-- Сила растяжения по движению -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-stretch">Вытягивание: <strong id="val-stretch">Умеренное</strong></label>
+          <input type="range" id="slider-stretch" min="1" max="5" value="3" step="1">
+        </div>
+
+        <!-- Анимация при клике -->
+        <div class="control-item">
+          <label class="ctrl-label" for="select-click">Эффект клика</label>
+          <select id="select-click" class="ctrl-select" title="Анимация при клике">
+            <option value="pop">Лопание</option>
+            <option value="shockwave" selected>Ударная волна</option>
+            <option value="implode">Схлопывание</option>
+            <option value="vortex">Вихрь</option>
+            <option value="ripple">Водная рябь</option>
+          </select>
+        </div>
+
+        <!-- Радиус анимации клика -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-click-radius">Радиус клика: <strong id="val-click-radius">55px</strong></label>
+          <input type="range" id="slider-click-radius" min="15" max="180" value="55" step="5">
+        </div>
+
+        <!-- Сила / интенсивность клика -->
+        <div class="control-item">
+          <label class="ctrl-label" for="slider-click-power">Сила клика: <strong id="val-click-power">0.4x</strong></label>
+          <input type="range" id="slider-click-power" min="0.2" max="2.5" value="0.4" step="0.1">
+        </div>
+
+        <!-- Переключатели -->
+        <div class="control-toggles">
+          <button type="button" class="toggle-pill" id="btn-shuffle" title="Перегенерировать хаотичное поле">
+            Перемешать
+          </button>
+          <button type="button" class="toggle-pill active" id="btn-toggle-goo" aria-pressed="true" title="Включить/выключить слияние метаболлов">
+            Слияние
+          </button>
+          <button type="button" class="toggle-pill" id="btn-toggle-vectors" aria-pressed="false" title="Показать векторы">
+            Векторы
+          </button>
+          <button type="button" class="toggle-pill active" id="btn-toggle-system-cursor" aria-pressed="true" title="Скрыть системный курсор">
+            Скрыть курсор
+          </button>
+          <button type="button" class="toggle-pill" id="btn-copy-config" title="Скопировать текущие настройки курсора">
+            Скопировать параметры
+          </button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="fluid-cursor.js"></script>
+</body>
+</html>
