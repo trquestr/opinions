@@ -153,7 +153,6 @@
 
           if (rCore <= 0.01 && absorb <= 0.001) continue;
 
-          float dCore = 1e5;
           vec4 core = vec4(0.0);
           vec2 dir = vec2(1.0, 0.0);
           if (rCore > 0.01) {
@@ -161,39 +160,58 @@
             vec2 sVec = core.zw;
             float stretch = length(sVec);
             dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
-            dCore = sdDroplet(p, core.xy, dir, rCore, stretch);
-            float kCore = min(9.5, rCore * 1.45);
-            dCores = smin(dCores, dCore, kCore);
+
+            // Капли в полёте объединяются в dCores; после приземления капля формирует
+            // единый органичный контур со своим штрихом, исключая наложение и паразитные бугорки
+            if (absorb <= 0.001) {
+              float dCore = sdDroplet(p, core.xy, dir, rCore, stretch);
+              float kCore = min(9.5, rCore * 1.45);
+              dCores = smin(dCores, dCore, kCore);
+            }
           }
 
           // Штрих буквы тянется от точки касания до текущего центра самой капли
           if (absorb > 0.001) {
             vec4 seg = u_dropSeg[i];
-            float dStrokeRaw;
+            float dOwn;
 
             if (segType < 0.5) {
               vec2 pa = p - seg.xy;
               vec2 ba = seg.zw - seg.xy;
               float len2 = dot(ba, ba);
+              float len = sqrt(len2);
               float h = len2 > 0.0001 ? clamp(dot(pa, ba) / len2, 0.0, 1.0) : 0.0;
               vec2 closest = seg.xy + ba * h;
-              dStrokeRaw = length(p - closest);
+              float dStrokeRaw = length(p - closest);
+
+              if (rCore > 0.01) {
+                // Плавный вогнутый раструб хвостика капли (concave flare):
+                // спереди — круглая выпуклая форма капли, а сзади — хвостик плавно изгибается
+                // внутрь, касаясь равномерного штриха буквы без боковых бугорков
+                float distFromB = (1.0 - h) * len;
+                float tailLen = max(0.001, min(len, rCore * 3.4));
+                float t = clamp(distFromB / tailLen, 0.0, 1.0);
+                float u = 1.0 - t;
+                float flare = u * u * u;
+                float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
+                dOwn = dStrokeRaw - localR;
+              } else {
+                dOwn = dStrokeRaw - u_strokeR;
+              }
             } else {
-              dStrokeRaw = sdArc(p, seg.xy, u_yahArcR, seg.z, seg.w);
-            }
+              float dStrokeRaw = sdArc(p, seg.xy, u_yahArcR, seg.z, seg.w);
 
-            // Строгая равномерная толщина штриха буквы
-            float dStroke = dStrokeRaw - u_strokeR;
-            float dOwn = dStroke;
-
-            if (rCore > 0.01) {
-              // Органический каплевидный мениск перетекания капли в штрих буквы:
-              // спереди сохраняется круглая выпуклая форма капли, а сзади формируется
-              // плавный сужающийся перешеек (teardrop neck), плавно переходящий в линию буквы
-              float forward = dot(p - core.xy, dir);
-              float neckWeight = forward <= 0.0 ? 1.0 : max(0.0, 1.0 - forward / max(0.001, rCore * 0.75));
-              float kNeck = rCore * 1.65 * neckWeight;
-              dOwn = smin(dCore, dStroke, kNeck);
+              if (rCore > 0.01) {
+                float distFromHead = max(0.0, -dot(p - core.xy, dir));
+                float tailLen = max(0.001, min(2.0 * seg.w * u_yahArcR, rCore * 3.4));
+                float t = clamp(distFromHead / tailLen, 0.0, 1.0);
+                float u = 1.0 - t;
+                float flare = u * u * u;
+                float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
+                dOwn = dStrokeRaw - localR;
+              } else {
+                dOwn = dStrokeRaw - u_strokeR;
+              }
             }
 
             // Чистый min без smin между отдельными штрихами, чтобы стыки букв оставались строгими
