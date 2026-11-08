@@ -313,9 +313,9 @@
     const tracking = H * 0.58;
 
     // Адаптивный масштаб размера точек под экраны десктопа, планшета и мобильного:
-    // На Desktop (H=134) dotScale = 1.0 (3.2..12.0px)
-    // На Tablet (H~90)   dotScale ≈ 0.79 (2.5..9.5px)
-    // На Mobile (H~47)   dotScale ≈ 0.54 (1.7..6.5px)
+    // На Desktop (H=134) dotScale = 1.0 (3.2..10.0px)
+    // На Tablet (H~90)   dotScale ≈ 0.79 (2.5..7.9px)
+    // На Mobile (H~47)   dotScale ≈ 0.54 (1.7..5.4px)
     const dotScale = Math.max(0.48, Math.min(1.0, 0.45 + 0.55 * Math.pow((H - 35) / (134 - 35), 0.85)));
 
     const letterSpecs = [
@@ -456,8 +456,8 @@
     }
 
     // Минимальная дистанция появления от конечной точки штриха (буквы):
-    // точки не должны появляться в упор к буквам, адаптируясь под экран
-    const minSpawnDist = Math.max(45, Math.min(Math.min(width, height) * 0.15, 125));
+    // даёт каплям достаточный разбег для плавного разгона без залипания и рывков
+    const minSpawnDist = Math.max(70, Math.min(Math.min(width, height) * 0.16, 135));
     const margin = Math.max(16, Math.min(28, width * 0.04));
 
     drops = [];
@@ -522,11 +522,11 @@
       const sizeRoll = Math.random();
       let rDrop;
       if (sizeRoll < 0.45) {
-        rDrop = (3.2 + Math.random() * 2.2) * dotScale;  // 3.2..5.4px * dotScale
+        rDrop = (3.2 + Math.random() * 1.8) * dotScale;  // 3.2..5.0px * dotScale (мелкие)
       } else if (sizeRoll < 0.80) {
-        rDrop = (5.6 + Math.random() * 2.6) * dotScale;  // 5.6..8.2px * dotScale
+        rDrop = (4.8 + Math.random() * 2.2) * dotScale;  // 4.8..7.0px * dotScale (средние, были 5.6..8.2)
       } else {
-        rDrop = (8.4 + Math.random() * 3.6) * dotScale;  // 8.4..12.0px * dotScale
+        rDrop = (7.2 + Math.random() * 2.8) * dotScale;  // 7.2..10.0px * dotScale (крупные, были 8.4..12.0)
       }
 
       drops.push({
@@ -550,8 +550,9 @@
         flowUx: ux,
         flowUy: uy,
         rDrop,
-        rDropNorm: rDrop / (13.6 * dotScale),
+        rDropNorm: rDrop / (10.0 * dotScale),
         radial,
+        flightDist: dist,
         seed: i * 2.39996 + Math.random() * 10.0,
         // Анимируемые через GSAP параметры:
         emerge: 0,      // 0 -> 1: всплытие круглой точки из полотна
@@ -661,7 +662,6 @@
       }
     });
 
-    const flightEases = ['power2.in', 'circ.in', 'power3.in', 'power2.in'];
     const absorbEases = ['power2.out', 'power3.out'];
 
     // 1. Старт полёта капель (Этап 3):
@@ -709,8 +709,8 @@
     // Каждая капля успевает спокойно полежать и подышать натяжением на полотне (~1.2-1.5с),
     // и затем плавно улетает в букву, пока вокруг неё продолжают непрерывно зарождаться новые точки!
     const birthTimes = [];
-    const emergeDur = 0.32;
-    const minRestTime = 0.38;
+    const emergeDur = 0.44;
+    const minRestTime = 0.32;
     const leadStart = 1.85;
     const leadPeak = 0.82;
 
@@ -734,15 +734,24 @@
       const tBirth = birthTimes[rank];
       const tLaunch = launchTimes[rank];
 
-      // Живая физика инерции и разнообразия скоростей:
-      // Каждая капля имеет свою массу и темп: маленькие резвее, крупные увесистее с выраженным разгоном.
-      // Достаточное время полёта (~0.50-0.82с) даёт глазу чётко увидеть само ускорение.
-      const dist = Math.hypot(d.sx - d.ax, d.sy - d.ay);
-      const massFactor = ((d.rDropNorm || 0.5) - 0.5) * 0.20;
-      const distFactor = Math.min(0.20, (dist / 600) * 0.20);
-      const randFactor = (Math.random() - 0.5) * 0.16;
-      const flightDur = Math.max(0.50, Math.min(0.82, 0.62 + massFactor + distFactor + randFactor));
-      const flightEase = flightEases[rank % flightEases.length];
+      // Адаптивная физика под дистанцию полёта:
+      // 1) Близкие точки (<140px): плавный квадратичный разгон (power1.in) без рывков и замираний
+      // 2) Средние дистанции (140..230px): мягкое кубическое ускорение (power2.in)
+      // 3) Дальние дистанции (>230px): глубокая инерция и скоростной хлёсткий рывок (power3.in)
+      const dist = d.flightDist || Math.hypot(d.sx - d.ax, d.sy - d.ay);
+      const distNorm = Math.min(1.0, Math.max(0.0, (dist - 70) / 360));
+      const massFactor = ((d.rDropNorm || 0.5) - 0.5) * 0.12;
+      const randFactor = (Math.random() - 0.5) * 0.08;
+      const flightDur = Math.max(0.36, Math.min(0.80, 0.40 + distNorm * 0.34 + massFactor + randFactor));
+
+      let flightEase;
+      if (dist < 140) {
+        flightEase = 'power1.in';
+      } else if (dist < 230) {
+        flightEase = 'power2.in';
+      } else {
+        flightEase = rank % 2 === 0 ? 'power3.in' : 'power2.in';
+      }
 
       // В момент касания штриха вся кинетическая энергия полёта мгновенно переходит в растекание
       const tAbsorbStart = tLaunch + flightDur;
@@ -762,10 +771,16 @@
         maxAbsorbEnd = tAbsorbEnd;
       }
 
+      // Эффект падения капли на страницу (капнула):
+      // При ударе о бумагу капля резко расплющивается с сочным всплеском (+16..25% к радиусу),
+      // затем упруго поджимается силами поверхностного натяжения и замирает глянцевой каплей
+      const emergeEase = (d.rDropNorm || 0.5) > 0.65 ? 'elastic.out(1.24, 0.42)' : 'elastic.out(1.16, 0.44)';
+      const curEmergeDur = (d.rDropNorm || 0.5) > 0.65 ? 0.46 : 0.42;
+
       mainTimeline.to(d, {
         emerge: 1,
-        duration: emergeDur,
-        ease: 'power2.out'
+        duration: curEmergeDur,
+        ease: emergeEase
       }, tBirth);
 
       mainTimeline.to(d, {
@@ -1094,8 +1109,11 @@
         const tanX = cubicBezierTangent(d.sx, d.cx1, d.cx2, d.ax, f);
         const tanY = cubicBezierTangent(d.sy, d.cy1, d.cy2, d.ay, f);
         const tanLen = Math.hypot(tanX, tanY) || 1;
+        const flightDist = d.flightDist || (Math.hypot(d.sx - d.ax, d.sy - d.ay) || 200);
+        const distScale = Math.min(1.0, Math.max(0.20, flightDist / 260));
+        const maxStretch = 0.20 + 0.48 * distScale;
         const flightBell = Math.sin(Math.pow(f, 0.65) * Math.PI);
-        const stretchFlight = Math.min(0.68, (0.16 + vFlight * 0.52) * flightBell);
+        const stretchFlight = Math.min(maxStretch, (0.08 * distScale + vFlight * 0.45 * distScale) * flightBell);
         targetSX = (tanX / tanLen) * stretchFlight;
         targetSY = (tanY / tanLen) * stretchFlight;
       } else if (abs >= 0.001) {
