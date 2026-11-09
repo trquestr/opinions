@@ -7,19 +7,22 @@
  *    ПОСТЕПЕННОЕ перетекание точек в буквы:
  *    - Позиция капли задаётся гладкой суммой C(t) = BezierFlight(f) + StrokeGlide(absorb),
  *      а растущий участок штриха идёт строго от точки касания BezierFlight(f) до центра капли C(t).
- *    - При absorb = 0 длина штриха равна 0 и он полностью скрыт внутри круглой капли —
- *      никакая линия не может появиться «из ничего» или выстрелить вперёд капли.
- *    - На протяжении 3.6..4.6 секунд круглая капля медленно скользит вдоль контура буквы,
- *      постепенно вытягивая за собой тонкий штрих через жидкий мениск smin(dCore, dStroke, kNeck)
- *      и плавно уменьшаясь в радиусе ровно до момента окончания своего штриха (absorb == 1).
+ *    - Капля, текущая по штриху, рисуется овальной головкой и плавным профилем шейки dropFlowRadius():
+ *      спереди овальная головка (вытянутость растёт со скоростью движения — физика капли),
+ *      сзади вогнутая шейка, которая с горизонтальной касательной втекает в линию штриха.
+ *      Профиль монотонен позади широкой точки, поэтому окружность капли не имеет
+ *      бугорков и изломов, а линии хвоста вогнуты, как натянутая жидкая плёнка.
+ *    - При absorb = 1 головка полностью растворилась в штрихе (параметр alive),
+ *      и на полотне остаётся точный капсульный штрих толщиной u_strokeR.
  */
 (function () {
   'use strict';
 
   const canvas = document.getElementById('gl-canvas');
-  const replayBtn = document.getElementById('replay-btn');
 
-  const hero = canvas.closest('.hero');
+  const heroScrollDown = document.getElementById('hero-scroll-down');
+
+  const hero = document.querySelector('.hero');
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
   let frameId = 0;
   let contextLost = false;
@@ -27,12 +30,14 @@
     contextLost = true;
     cancelAnimationFrame(frameId);
     hero.classList.remove('is-ready');
-    replayBtn.hidden = true;
+    document.body.classList.remove('is-ready');
+    canvas.classList.remove('is-ready');
+
   }
 
   let gl;
   try {
-    gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false });
+    gl = canvas.getContext('webgl2', { antialias: false, alpha: true, depth: false, stencil: false });
   } catch (_) {
     showFallback();
     return;
@@ -64,15 +69,15 @@
 
     uniform vec2 u_res;
     uniform float u_dpr;
-    uniform float u_time;
     uniform float u_strokeR;
     uniform float u_yahArcR;
+    uniform float u_scrollY;
 
     // Капли и постепенно вытекающие из них штрихи (1 капля = 1 уникальный участок буквы)
     uniform int u_dropCount;
     uniform vec4 u_dropCore[${MAX_DROPS}];   // (cx, cy, stretchDirX, stretchDirY) овально-каплевидного ядра точки
-    uniform vec4 u_dropSeg[${MAX_DROPS}];    // type 0: (startX, startY, curX, curY), type 1: (arcCx, arcCy, aMid, da)
-    uniform vec4 u_dropParams[${MAX_DROPS}]; // (rCore, absorb, wet, segType)
+    uniform vec4 u_dropSeg[${MAX_DROPS}];    // type 0: (startX, startY, tipX, tipY), type 1: (arcCx, arcCy, aMid, da)
+    uniform vec4 u_dropParams[${MAX_DROPS}]; // (rCore, absorb, 0, segType)
     uniform vec4 u_textBBox;                 // (minX, minY, maxX, maxY) буквы «МНЕНИЯ»
 
     // Скрытые точки под курсором
@@ -82,14 +87,6 @@
     uniform vec4 u_cursorBBox;                     // (minX, minY, maxX, maxY)
 
     out vec4 outColor;
-
-    float sdSegment(vec2 p, vec2 a, vec2 b) {
-      vec2 pa = p - a;
-      vec2 ba = b - a;
-      float denom = dot(ba, ba);
-      float h = denom > 0.0001 ? clamp(dot(pa, ba) / denom, 0.0, 1.0) : 0.0;
-      return length(pa - ba * h);
-    }
 
     // Гладкая овальная/каплевидная форма (без параллельных прямых стенок капсулы-«гусеницы»):
     // при движении плавно вытягивается вдоль вектора скорости dir, слегка сужаясь с боков и к хвостику
@@ -103,11 +100,13 @@
       float sx = 1.0 + stretch;
       float sy = inversesqrt(1.0 + stretch * 0.85);
 
-      // Каплевидный профиль: круглая головка спереди (qx > 0) и плавно сужающийся хвостик сзади (qx < 0)
-      float normX = clamp(qx / max(0.001, r * sx), -1.0, 1.0);
-      float tearTaper = 1.0 + normX * min(0.24, stretch * 0.32);
+      // Каплевидный профиль: круглая головка спереди (qx > 0) и вогнуто сужающийся хвостик
+      // сзади (qx < 0). Сужение — гладкая кривая с горизонтальной касательной в широкой
+      // точке: нет ни излома на макушке, ни прямых конических стенок
+      float rear = clamp(-qx / max(0.001, r * sx), 0.0, 1.0);
+      float taper = min(0.24, stretch * 0.5) * rear * rear * (3.0 - 2.0 * rear);
 
-      vec2 qScaled = vec2(qx / sx, qy / (sy * tearTaper));
+      vec2 qScaled = vec2(qx / sx, qy / (sy * (1.0 - taper)));
       return (length(qScaled) - r) * min(sx, sy);
     }
 
@@ -131,8 +130,33 @@
       return min(a, b) - h * h * k * 0.25;
     }
 
+    const float PI_C = 3.14159265;
+    const float TWO_PI_C = 6.28318531;
+
+    float wrapPi(float a) {
+      return mod(a + PI_C, TWO_PI_C) - PI_C;
+    }
+
+    // Вогнутая шейка: горизонтальная касательная у головки и у тонкого хвоста.
+    // Ось заканчивается в центре головы; полный эллипс сохраняет её заднюю
+    // половину даже при коротком штрихе в первые кадры контакта.
+    float dropFlowRadius(float x, float xc, float rHead, float alive) {
+      float neck = max(0.001, min(xc, rHead * 3.3));
+      float u = clamp((xc - x) / neck, 0.0, 1.0);
+      float profile = pow(max(0.0, cos(u * 1.57079632)), 2.6);
+      return u_strokeR + max(0.0, rHead - u_strokeR) * profile * alive;
+    }
+
+    // Полная овальная головка; при alive = 0 точно круглый конец штриха.
+    float dropFlowHead(vec2 q, float rHead, float stretch, float alive) {
+      float radius = mix(u_strokeR, rHead, alive);
+      float aspect = mix(1.0, 1.12 + 0.5 * stretch, alive);
+      return length(vec2(q.x / aspect, q.y)) - radius;
+    }
+
     void main() {
       vec2 p = vec2(gl_FragCoord.x / u_dpr, u_res.y - gl_FragCoord.y / u_dpr);
+      vec2 pText = vec2(p.x, p.y + u_scrollY);
       float aa = 0.7 / u_dpr;
 
       // dCores объединяет сами круглые капли друг с другом через жидкий метаболл smin,
@@ -141,79 +165,72 @@
       float dStrokes = 1e5;
 
       // Быстрое отсечение: если пиксель далеко от букв, пропускаем весь цикл 108 участков
-      if (p.x >= u_textBBox.x && p.x <= u_textBBox.z &&
-          p.y >= u_textBBox.y && p.y <= u_textBBox.w) {
+      if (pText.x >= u_textBBox.x && pText.x <= u_textBBox.z &&
+          pText.y >= u_textBBox.y && pText.y <= u_textBBox.w) {
         for (int i = 0; i < ${MAX_DROPS}; i++) {
           if (i >= u_dropCount) break;
           vec4 params = u_dropParams[i];
           float rCore = params.x;
           float absorb = params.y;
-          float wet = params.z;
           float segType = params.w;
 
           if (rCore <= 0.01 && absorb <= 0.001) continue;
 
-          vec4 core = vec4(0.0);
-          vec2 dir = vec2(1.0, 0.0);
-          float dDrop = 1e5;
-          if (rCore > 0.01) {
-            core = u_dropCore[i];
-            vec2 sVec = core.zw;
-            float stretch = length(sVec);
-            dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
-            dDrop = sdDroplet(p, core.xy, dir, rCore, stretch);
+          vec4 core = u_dropCore[i];
+          vec2 sVec = core.zw;
+          float stretch = length(sVec);
+          vec2 dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
 
-            // Капли в полёте объединяются в dCores
-            if (absorb <= 0.001) {
+          if (absorb <= 0.001) {
+            // Полёт: капли в воздухе объединяются в жидкое метаболл-облако dCores
+            if (rCore > 0.01) {
+              float dDrop = sdDroplet(pText, core.xy, dir, rCore, stretch);
               float kCore = min(9.5, rCore * 1.45);
               dCores = smin(dCores, dDrop, kCore);
             }
-          }
-
-          // Штрих буквы тянется от точки касания до текущего центра самой капли
-          if (absorb > 0.001) {
+          } else {
+            // Растекание по штриху: ось заканчивается в центре овальной головы.
+            // Полный овал дополняет шейку: короткий хвост не обрезает заднюю половину.
             vec4 seg = u_dropSeg[i];
+            float sy = inversesqrt(1.0 + 0.85 * stretch);
+            float rHead = max(rCore * sy, u_strokeR);
+            // Головка держит полную форму, пока заметно шире штриха,
+            // и растворяется только в самом конце участка
+            float alive = clamp((rHead - u_strokeR) / (0.30 * rHead + 0.001), 0.0, 1.0);
             float dOwn;
 
             if (segType < 0.5) {
-              vec2 pa = p - seg.xy;
               vec2 ba = seg.zw - seg.xy;
               float len2 = dot(ba, ba);
               float len = sqrt(len2);
-              float h = len2 > 0.0001 ? clamp(dot(pa, ba) / len2, 0.0, 1.0) : 0.0;
-              vec2 closest = seg.xy + ba * h;
-              float dStrokeRaw = length(p - closest);
-
-              if (rCore > 0.01) {
-                // Плавный вогнутый раструб хвостика капли (concave flare):
-                // сама капля всегда сохраняет полную круглую форму (dDrop), а сзади
-                // от неё формируется вогнутый сужающийся перешеек без раздувания и бугорков
-                float distFromB = (1.0 - h) * len;
-                float tailLen = max(0.001, rCore * 3.2);
-                float t = clamp(distFromB / tailLen, 0.0, 1.0);
-                float u = 1.0 - t;
-                float flare = u * u * u;
-                float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
-                float dFlaredStroke = dStrokeRaw - localR;
-                dOwn = min(dDrop, dFlaredStroke);
-              } else {
-                dOwn = dStrokeRaw - u_strokeR;
-              }
+              vec2 axis = len > 0.0001 ? ba / len : dir;
+              float along = dot(pText - seg.xy, axis);
+              float x = clamp(along, 0.0, len);
+              float dAxis = length(pText - (seg.xy + axis * x));
+              vec2 q = vec2(along - len, dot(pText - seg.zw, vec2(-axis.y, axis.x)));
+              float dHead = dropFlowHead(q, rHead, stretch, alive);
+              float neckBlend = rHead * 0.3 * alive * smoothstep(0.0, rHead * 0.5, -q.x);
+              dOwn = q.x >= 0.0 ? dHead
+                : smin(dHead, dAxis - dropFlowRadius(x, len, rHead, alive), neckBlend);
             } else {
-              float dStrokeRaw = sdArc(p, seg.xy, u_yahArcR, seg.z, seg.w);
-
-              if (rCore > 0.01) {
-                float distFromHead = max(0.0, -dot(p - core.xy, dir));
-                float tailLen = max(0.001, rCore * 3.2);
-                float t = clamp(distFromHead / tailLen, 0.0, 1.0);
-                float u = 1.0 - t;
-                float flare = u * u * u;
-                float localR = u_strokeR + max(0.0, rCore - u_strokeR) * flare;
-                float dFlaredStroke = dStrokeRaw - localR;
-                dOwn = min(dDrop, dFlaredStroke);
-              } else {
-                dOwn = dStrokeRaw - u_strokeR;
-              }
+              float dAxis = sdArc(pText, seg.xy, u_yahArcR, seg.z, seg.w);
+              float da = abs(seg.w);
+              // Голова — тот конец дуги, возле которого фактически лежит центр капли
+              float aHead = atan(core.y - seg.y, core.x - seg.x);
+              float s = abs(wrapPi(aHead - seg.z - da)) < abs(wrapPi(aHead - seg.z + da)) ? 1.0 : -1.0;
+              float a0 = seg.z - s * da;
+              float L = 2.0 * da * u_yahArcR;
+              float ang = atan(pText.y - seg.y, pText.x - seg.x);
+              float x = clamp(s * wrapPi(ang - a0) * u_yahArcR, 0.0, L);
+              float aTip = seg.z + s * da;
+              vec2 normal = vec2(cos(aTip), sin(aTip));
+              vec2 tangent = s * vec2(-normal.y, normal.x);
+              vec2 fromHead = pText - (seg.xy + normal * u_yahArcR);
+              vec2 q = vec2(dot(fromHead, tangent), dot(fromHead, normal));
+              float dHead = dropFlowHead(q, rHead, stretch, alive);
+              float neckBlend = rHead * 0.3 * alive * smoothstep(0.0, rHead * 0.5, -q.x);
+              dOwn = q.x >= 0.0 ? dHead
+                : smin(dHead, dAxis - dropFlowRadius(x, L, rHead, alive), neckBlend);
             }
 
             // Чистый min без smin между отдельными штрихами, чтобы стыки букв оставались строгими
@@ -258,8 +275,7 @@
       float d = smin(dText, dCursor, kGoo);
 
       float ink = 1.0 - smoothstep(-aa, aa, d);
-      vec3 col = mix(vec3(1.0), vec3(0.0), ink);
-      outColor = vec4(col, 1.0);
+      outColor = vec4(0.0, 0.0, 0.0, ink);
     }
   `;
 
@@ -307,7 +323,6 @@
 
   const uRes = gl.getUniformLocation(prog, 'u_res');
   const uDpr = gl.getUniformLocation(prog, 'u_dpr');
-  const uTime = gl.getUniformLocation(prog, 'u_time');
   const uStrokeR = gl.getUniformLocation(prog, 'u_strokeR');
   const uYahArcR = gl.getUniformLocation(prog, 'u_yahArcR');
 
@@ -316,6 +331,7 @@
   const uDropSeg = gl.getUniformLocation(prog, 'u_dropSeg');
   const uDropParams = gl.getUniformLocation(prog, 'u_dropParams');
   const uTextBBox = gl.getUniformLocation(prog, 'u_textBBox');
+  const uScrollY = gl.getUniformLocation(prog, 'u_scrollY');
 
   const uCursorCount = gl.getUniformLocation(prog, 'u_cursorCount');
   const uCursorDots = gl.getUniformLocation(prog, 'u_cursorDots');
@@ -383,17 +399,13 @@
     dropsStaticUploaded = false;
 
     const subSegments = [];
-    let strokeGroupCounter = 0;
 
     // Разбивает прямой штрих [x0,y0 -> x1,y1] на неперекрывающиеся участки с РАЗНЫМИ точками входа
-    const addStroke = (x0, y0, x1, y1, parts, letterIdx) => {
-      const groupIdx = strokeGroupCounter++;
+    const addStroke = (x0, y0, x1, y1, parts) => {
       if (parts <= 1) {
         const flip = Math.random() < 0.5;
         subSegments.push({
           type: 0,
-          letterIdx,
-          groupIdx,
           ax: flip ? x1 : x0,
           ay: flip ? y1 : y0,
           bx: flip ? x0 : x1,
@@ -422,8 +434,6 @@
         const flip = Math.random() < 0.5;
         subSegments.push({
           type: 0,
-          letterIdx,
-          groupIdx,
           ax: flip ? pBx : pAx,
           ay: flip ? pBy : pAy,
           bx: flip ? pAx : pBx,
@@ -443,25 +453,25 @@
       const yM = topY + H * 0.50;
 
       if (ch === 'М') {
-        addStroke(xL, yB, xL, yT, 5, li);
-        addStroke(xL, yT, xM, yB - H * 0.14, 4, li);
-        addStroke(xM, yB - H * 0.14, xR, yT, 4, li);
-        addStroke(xR, yT, xR, yB, 5, li);
+        addStroke(xL, yB, xL, yT, 5);
+        addStroke(xL, yT, xM, yB - H * 0.14, 4);
+        addStroke(xM, yB - H * 0.14, xR, yT, 4);
+        addStroke(xR, yT, xR, yB, 5);
       } else if (ch === 'Н') {
-        addStroke(xL, yT, xL, yB, 5, li);
-        addStroke(xR, yT, xR, yB, 5, li);
-        addStroke(xL, yM, xR, yM, 3, li);
+        addStroke(xL, yT, xL, yB, 5);
+        addStroke(xR, yT, xR, yB, 5);
+        addStroke(xL, yM, xR, yM, 3);
       } else if (ch === 'Е') {
-        addStroke(xL, yT, xL, yB, 5, li);
-        addStroke(xL, yT, xR, yT, 3, li);
-        addStroke(xL, yM, xL + lw * 0.86, yM, 3, li);
-        addStroke(xL, yB, xR, yB, 3, li);
+        addStroke(xL, yT, xL, yB, 5);
+        addStroke(xL, yT, xR, yT, 3);
+        addStroke(xL, yM, xL + lw * 0.86, yM, 3);
+        addStroke(xL, yB, xR, yB, 3);
       } else if (ch === 'И') {
-        addStroke(xL, yT, xL, yB, 5, li);
-        addStroke(xL, yB, xR, yT, 5, li);
-        addStroke(xR, yT, xR, yB, 5, li);
+        addStroke(xL, yT, xL, yB, 5);
+        addStroke(xL, yB, xR, yT, 5);
+        addStroke(xR, yT, xR, yB, 5);
       } else if (ch === 'Я') {
-        addStroke(xR, yT, xR, yB, 5, li);
+        addStroke(xR, yT, xR, yB, 5);
 
         const bowlH = H * 0.54;
         yahArcR = bowlH * 0.5;
@@ -469,38 +479,37 @@
         const arcCy = yT + yahArcR;
 
         // Верхняя и нижняя перекладины головки «Я»
-        addStroke(arcCx, yT, xR, yT, 3, li);
-        addStroke(arcCx, yT + bowlH, xR, yT + bowlH, 3, li);
+        addStroke(arcCx, yT, xR, yT, 3);
+        addStroke(arcCx, yT + bowlH, xR, yT + bowlH, 3);
 
         // Полукруглая дуга «Я»: 4 четверти дуги (капли входят с разных сторон и сходятся навстречу)
-        const arcGroup = strokeGroupCounter++;
         subSegments.push({
-          type: 1, letterIdx: li, groupIdx: arcGroup,
+          type: 1,
           arcCx, arcCy, a0: Math.PI, aEnd: Math.PI * 1.25,
           ax: arcCx - yahArcR, ay: arcCy,
           bx: arcCx + Math.cos(Math.PI * 1.25) * yahArcR, by: arcCy + Math.sin(Math.PI * 1.25) * yahArcR
         });
         subSegments.push({
-          type: 1, letterIdx: li, groupIdx: arcGroup,
+          type: 1,
           arcCx, arcCy, a0: Math.PI * 1.5, aEnd: Math.PI * 1.25,
           ax: arcCx, ay: arcCy - yahArcR,
           bx: arcCx + Math.cos(Math.PI * 1.25) * yahArcR, by: arcCy + Math.sin(Math.PI * 1.25) * yahArcR
         });
         subSegments.push({
-          type: 1, letterIdx: li, groupIdx: arcGroup,
+          type: 1,
           arcCx, arcCy, a0: Math.PI, aEnd: Math.PI * 0.75,
           ax: arcCx - yahArcR, ay: arcCy,
           bx: arcCx + Math.cos(Math.PI * 0.75) * yahArcR, by: arcCy + Math.sin(Math.PI * 0.75) * yahArcR
         });
         subSegments.push({
-          type: 1, letterIdx: li, groupIdx: arcGroup,
+          type: 1,
           arcCx, arcCy, a0: Math.PI * 0.5, aEnd: Math.PI * 0.75,
           ax: arcCx, ay: arcCy + yahArcR,
           bx: arcCx + Math.cos(Math.PI * 0.75) * yahArcR, by: arcCy + Math.sin(Math.PI * 0.75) * yahArcR
         });
 
         // Диагональная ножка «Я»
-        addStroke(arcCx + H * 0.04, yT + bowlH, xL, yB, 4, li);
+        addStroke(arcCx + H * 0.04, yT + bowlH, xL, yB, 4);
       }
 
       curX += lw + tracking;
@@ -582,8 +591,6 @@
 
       drops.push({
         type: seg.type,
-        letterIdx: seg.letterIdx,
-        groupIdx: seg.groupIdx,
         sx,
         sy,
         cx1,
@@ -609,7 +616,6 @@
         emerge: 0,      // 0 -> 1: всплытие круглой точки из полотна
         flight: 0,      // 0 -> 1: полёт точки от (sx, sy) к точке касания штриха (ax, ay)
         absorb: 0,      // 0 -> 1: динамичное растекание вдоль штриха (ax,ay -> bx,by) по инерции удара
-        wet: 1,         // 1 -> 0: капиллярная флюидность свежих чернил буквы
         stretchX: 0,    // плавно сглаженный вектор овально-каплевидного растяжения по X
         stretchY: 0,    // плавно сглаженный вектор овально-каплевидного растяжения по Y
         prevFlight: 0,
@@ -624,6 +630,139 @@
   const cursorReveal = { value: 0 };
   let cursorRevealTween = null;
 
+  const scrollDotElements = [
+    document.getElementById('scroll-dot-0'),
+    document.getElementById('scroll-dot-1'),
+    document.getElementById('scroll-dot-2')
+  ];
+
+  let scrollDotsTimeline = null;
+  let scrollDotsActive = false;
+
+  function stopScrollDotsAnimation() {
+    scrollDotsActive = false;
+    if (scrollDotsTimeline) {
+      scrollDotsTimeline.kill();
+      scrollDotsTimeline = null;
+    }
+    if (scrollDotElements[0] && window.gsap) {
+      window.gsap.set(scrollDotElements, { opacity: 0, scale: 0.3, y: -5 });
+    }
+  }
+
+  function startScrollDotsAnimation() {
+    if (scrollDotsActive || !scrollDotElements[0] || !window.gsap) return;
+    scrollDotsActive = true;
+
+    if (motionPreference.matches) {
+      window.gsap.set(scrollDotElements, { opacity: 0.95, scale: 1, y: 0 });
+      return;
+    }
+
+    const dotConfigs = [
+      // 1. Top right, mid left, bottom center (matches reference screenshot)
+      [
+        { x: 3.2, y: -22.5, r: 6.2 },
+        { x: -5.5, y: -1.0, r: 5.2 },
+        { x: -0.8, y: 19.0, r: 2.4 }
+      ],
+      // 2. Top left, mid right, bottom slight right
+      [
+        { x: -3.0, y: -23.0, r: 5.9 },
+        { x: 4.5, y: -1.5, r: 4.9 },
+        { x: 1.0, y: 19.5, r: 2.5 }
+      ],
+      // 3. Top center-right, mid slight left, bottom slight left
+      [
+        { x: 1.8, y: -22.0, r: 6.4 },
+        { x: -4.0, y: -0.5, r: 5.4 },
+        { x: -1.2, y: 18.5, r: 2.3 }
+      ],
+      // 4. Top slight left, mid center, bottom center
+      [
+        { x: -2.0, y: -22.5, r: 6.0 },
+        { x: 3.0, y: -2.0, r: 5.0 },
+        { x: 0.5, y: 19.2, r: 2.6 }
+      ]
+    ];
+
+    let cycleIndex = 0;
+
+    function playNextCycle() {
+      if (!scrollDotsActive) return;
+      const cfg = dotConfigs[cycleIndex % dotConfigs.length];
+      cycleIndex++;
+
+      scrollDotElements.forEach((dot, i) => {
+        dot.setAttribute('cx', cfg[i].x);
+        dot.setAttribute('cy', cfg[i].y);
+        dot.setAttribute('r', cfg[i].r);
+        window.gsap.set(dot, { opacity: 0, scale: 0.3, y: -5 });
+      });
+
+      scrollDotsTimeline = window.gsap.timeline({
+        onComplete() {
+          if (scrollDotsActive) {
+            window.gsap.delayedCall(0.45, playNextCycle);
+          }
+        }
+      });
+
+      // 1. Dots appear one by one from top to bottom
+      scrollDotsTimeline.to(scrollDotElements[0], {
+        opacity: 0.95,
+        scale: 1,
+        y: 0,
+        duration: 0.48,
+        ease: 'back.out(1.4)'
+      }, 0.0);
+
+      scrollDotsTimeline.to(scrollDotElements[1], {
+        opacity: 0.95,
+        scale: 1,
+        y: 0,
+        duration: 0.46,
+        ease: 'back.out(1.4)'
+      }, 0.28);
+
+      scrollDotsTimeline.to(scrollDotElements[2], {
+        opacity: 0.95,
+        scale: 1,
+        y: 0,
+        duration: 0.42,
+        ease: 'back.out(1.4)'
+      }, 0.54);
+
+      // 2. Hold all 3 visible in vertical column (0.54s + 0.42s = 0.96s -> 1.76s = 0.8s hold)
+      // 3. Trickle / drift downward and fade out in sequence
+      scrollDotsTimeline.to(scrollDotElements[0], {
+        opacity: 0,
+        scale: 0.4,
+        y: 6,
+        duration: 0.44,
+        ease: 'power2.in'
+      }, 1.76);
+
+      scrollDotsTimeline.to(scrollDotElements[1], {
+        opacity: 0,
+        scale: 0.4,
+        y: 6,
+        duration: 0.44,
+        ease: 'power2.in'
+      }, 1.96);
+
+      scrollDotsTimeline.to(scrollDotElements[2], {
+        opacity: 0,
+        scale: 0.4,
+        y: 6,
+        duration: 0.44,
+        ease: 'power2.in'
+      }, 2.16);
+    }
+
+    playNextCycle();
+  }
+
   function setCursorEnabled(enabled) {
     cursorEnabled = !!enabled;
     if (cursorRevealTween) {
@@ -633,6 +772,9 @@
 
     if (cursorEnabled) {
       hero.classList.add('cursor-ready');
+      if (heroScrollDown) heroScrollDown.classList.add('is-visible');
+      startScrollDotsAnimation();
+      startDriftingClouds();
       if (lastPointerX >= 0 && lastPointerY >= 0 && !document.hidden) {
         pointer.moveTo(lastPointerX, lastPointerY);
       }
@@ -650,6 +792,9 @@
       scheduleRender();
     } else {
       hero.classList.remove('cursor-ready');
+      if (heroScrollDown) heroScrollDown.classList.remove('is-visible');
+      stopScrollDotsAnimation();
+      stopDriftingClouds();
       cursorReveal.value = 0;
       if (typeof pointer !== 'undefined') pointer.leave();
       if (typeof FIN !== 'undefined' && FIN) FIN.fill(0);
@@ -665,22 +810,470 @@
     }
   }
 
+  
+  window.__setCursorEnabled = setCursorEnabled;
+
+  // ==========================================================================
+  // ГЕРОИЧЕСКАЯ КОМПОЗИЦИЯ: ОБЛАКО, АРКИ И ОРБИТАЛЬНЫЕ ЛИНИИ
+  // ==========================================================================
+  const heroComposition = document.getElementById('hero-composition');
+  const heroCloud = document.getElementById('hero-cloud') || document.getElementById('hero-bust');
+  const heroOrbitsWrapper = document.getElementById('hero-orbits-wrapper');
+  const heroOrbits = document.getElementById('hero-orbits');
+  const heroAxisSvg = document.getElementById('hero-axis-svg');
+  const heroEllipseRunner = document.getElementById('hero-ellipse-runner');
+
+  const cosR = Math.cos(-11 * Math.PI / 180);
+  const sinR = Math.sin(-11 * Math.PI / 180);
+  const ellipseRunnerObj = { angle: 0 };
+  let orbitRunnerTween = null;
+  let orbitSwayXTween = null;
+  let orbitSwayYTween = null;
+  let orbitSwayZTween = null;
+
+  function updateEllipseRunnerPosition(t) {
+    if (!heroEllipseRunner) return;
+    const ex = 650 * Math.cos(t);
+    const ey = 230 * Math.sin(t);
+    const x = ex * cosR - ey * sinR;
+    const y = ex * sinR + ey * cosR;
+    heroEllipseRunner.setAttribute('cx', x.toFixed(2));
+    heroEllipseRunner.setAttribute('cy', y.toFixed(2));
+  }
+
+  function startOrbitMotion() {
+    killIdleTweens();
+    if (motionPreference.matches || !window.gsap) return;
+    if (heroComposition) heroComposition.classList.add('is-active-orbits');
+    if (heroOrbits) heroOrbits.classList.add('is-active-orbits');
+    if (heroAxisSvg) heroAxisSvg.classList.add('is-active-orbits');
+    
+    if (heroEllipseRunner) {
+      orbitRunnerTween = window.gsap.to(ellipseRunnerObj, {
+        angle: Math.PI * 2,
+        duration: 32,
+        repeat: -1,
+        ease: 'none',
+        onUpdate() {
+          updateEllipseRunnerPosition(ellipseRunnerObj.angle);
+        }
+      });
+    }
+
+    // Gentle 3D oscillation of orbital rings around the central horizontal axis
+    const orbitsContainer = heroOrbitsWrapper || heroOrbits;
+    if (orbitsContainer) {
+      window.gsap.set(orbitsContainer, {
+        xPercent: -50,
+        yPercent: -50,
+        x: 0,
+        y: 0,
+        transformOrigin: '50% 50%'
+      });
+
+      // 1. Slow 3D tilt around the horizontal axis (X-axis): ±5.5 degrees, ~16s cycle
+      orbitSwayXTween = window.gsap.fromTo(orbitsContainer,
+        { rotationX: -5.5 },
+        {
+          rotationX: 5.5,
+          duration: 16,
+          ease: 'sine.inOut',
+          yoyo: true,
+          repeat: -1
+        }
+      );
+
+      // 2. Subtle precession out of plane (Y-axis): ±2.5 degrees, ~21s cycle
+      orbitSwayYTween = window.gsap.fromTo(orbitsContainer,
+        { rotationY: -2.5 },
+        {
+          rotationY: 2.5,
+          duration: 21,
+          ease: 'sine.inOut',
+          yoyo: true,
+          repeat: -1
+        }
+      );
+
+      // 3. Gentle axial roll (Z-axis): ±1.2 degrees, ~26s cycle
+      orbitSwayZTween = window.gsap.fromTo(orbitsContainer,
+        { rotationZ: -1.2 },
+        {
+          rotationZ: 1.2,
+          duration: 26,
+          ease: 'sine.inOut',
+          yoyo: true,
+          repeat: -1
+        }
+      );
+    }
+  }
+
+  function killIdleTweens() {
+    if (orbitRunnerTween) {
+      orbitRunnerTween.kill();
+      orbitRunnerTween = null;
+    }
+    if (orbitSwayXTween) {
+      orbitSwayXTween.kill();
+      orbitSwayXTween = null;
+    }
+    if (orbitSwayYTween) {
+      orbitSwayYTween.kill();
+      orbitSwayYTween = null;
+    }
+    if (orbitSwayZTween) {
+      orbitSwayZTween.kill();
+      orbitSwayZTween = null;
+    }
+    const orbitsContainer = heroOrbitsWrapper || heroOrbits;
+    if (orbitsContainer && window.gsap) {
+      window.gsap.set(orbitsContainer, { rotationX: 0, rotationY: 0, rotationZ: 0 });
+    }
+    if (heroComposition) heroComposition.classList.remove('is-active-orbits');
+    if (heroOrbits) heroOrbits.classList.remove('is-active-orbits');
+    if (heroAxisSvg) heroAxisSvg.classList.remove('is-active-orbits');
+  }
+
+  function setupHeroArtwork() {
+    killIdleTweens();
+    stopDriftingClouds();
+    ellipseRunnerObj.angle = 0;
+    updateEllipseRunnerPosition(0);
+
+    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
+    if (orbitElements.length) {
+      if (heroComposition) heroComposition.classList.remove('is-active-orbits');
+      if (heroOrbits) heroOrbits.classList.remove('is-active-orbits');
+      if (heroAxisSvg) heroAxisSvg.classList.remove('is-active-orbits');
+      if (window.gsap) {
+        window.gsap.set(orbitElements, { opacity: 0 });
+      } else {
+        orbitElements.forEach(el => { el.style.opacity = '0'; });
+      }
+    }
+
+  }
+
+  function resetHeroArtwork() {
+    setupHeroArtwork();
+  }
+
+  function showHeroArtworkInstant() {
+    killIdleTweens();
+    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
+    if (window.gsap) {
+      window.gsap.set(orbitElements, { opacity: 1 });
+    } else {
+      orbitElements.forEach(el => { el.style.opacity = '1'; });
+    }
+    startOrbitMotion();
+    startDriftingClouds();
+  }
+
+  function createHeroArtworkTimeline() {
+    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
+    if (!orbitElements.length || !window.gsap) return null;
+    const tl = window.gsap.timeline({
+      onComplete() {
+        startOrbitMotion();
+      }
+    });
+
+    // 1. Плавное проявление орбит и горизонтальной оси 70vw
+    tl.to(orbitElements, {
+      opacity: 1,
+      duration: 1.8,
+      ease: 'sine.out'
+    }, 0);
+
+
+
+    return tl;
+  }
+
+  // ==========================================================================
+  // ПАРЯЩИЕ ОБЛАКА НАД ТЕКСТОМ (DRIFTING CLOUDS OVER TEXT WITH 3D TILT HOVER)
+  // ==========================================================================
+  const driftingCloudsLayer = document.getElementById('drifting-clouds-layer');
+
+  const CLOUD_ASSETS = [
+    { src: 'assets/cloud_01.png', widthVw: 28, aspect: 3.00, baseDuration: 115 },
+    { src: 'assets/cloud_02.png', widthVw: 27, aspect: 3.00, baseDuration: 145 },
+    { src: 'assets/cloud_03.png', widthVw: 24, aspect: 2.00, baseDuration: 100 },
+    { src: 'assets/cloud_04.png', widthVw: 22, aspect: 1.78, baseDuration: 80 },
+    { src: 'assets/cloud_05.png', widthVw: 25, aspect: 2.00, baseDuration: 130 },
+    { src: 'assets/cloud_06.png', widthVw: 20, aspect: 1.50, baseDuration: 72 },
+    { src: 'assets/cloud_07.png', widthVw: 23, aspect: 2.00, baseDuration: 105 },
+    { src: 'assets/cloud_08.png', widthVw: 25, aspect: 2.00, baseDuration: 155 },
+    { src: 'assets/cloud_09.png', widthVw: 24, aspect: 2.00, baseDuration: 110 },
+    { src: 'assets/cloud_10.png', widthVw: 26, aspect: 2.00, baseDuration: 138 },
+  ];
+
+  // Preload cloud images into browser cache
+  CLOUD_ASSETS.forEach(item => {
+    const img = new Image();
+    img.src = item.src;
+  });
+
+  const MAX_ACTIVE_CLOUDS = 2;
+  const activeDriftingClouds = [];
+  let driftingCloudsRunning = false;
+  let cloudSpawnTimer = null;
+  let lastAssetIndex = -1;
+  let lastLaneIndex = -1;
+
+  // Distinct altitude lanes in the upper sky, strictly ABOVE the wordmark "МНЕНИЯ"
+  const ALTITUDE_LANES = [
+    { name: 'sky-top', topPercent: 7, jitter: 2 },     // 5% - 9%
+    { name: 'sky-mid', topPercent: 14, jitter: 2.5 },  // 11.5% - 16.5%
+    { name: 'sky-lower', topPercent: 21, jitter: 2 }   // 19% - 23%
+  ];
+
+  function attachCloud3DTilt(wrapper) {
+    if (!wrapper || motionPreference.matches || !window.gsap) return null;
+
+    const maxTilt = 18;
+    const rotXTo = window.gsap.quickTo(wrapper, 'rotationX', { duration: 0.35, ease: 'power2.out' });
+    const rotYTo = window.gsap.quickTo(wrapper, 'rotationY', { duration: 0.35, ease: 'power2.out' });
+    const zTo = window.gsap.quickTo(wrapper, 'z', { duration: 0.35, ease: 'power2.out' });
+    let leaveTween = null;
+
+    function onPointerEnter() {
+      if (leaveTween) {
+        leaveTween.kill();
+        leaveTween = null;
+      }
+    }
+
+    function onPointerMove(e) {
+      if (leaveTween) {
+        leaveTween.kill();
+        leaveTween = null;
+      }
+      const rect = wrapper.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const px = Math.max(-0.5, Math.min(0.5, (e.clientX - rect.left) / rect.width - 0.5));
+      const py = Math.max(-0.5, Math.min(0.5, (e.clientY - rect.top) / rect.height - 0.5));
+
+      // 3D Tilt: mouse at edge sinks that edge into the depth, opposite edge pokes out
+      rotXTo(-py * 2 * maxTilt);
+      rotYTo(px * 2 * maxTilt);
+      zTo(-10);
+    }
+
+    function onPointerLeave() {
+      if (leaveTween) {
+        leaveTween.kill();
+      }
+      leaveTween = window.gsap.to(wrapper, {
+        rotationX: 0,
+        rotationY: 0,
+        z: 0,
+        duration: 0.85,
+        ease: 'power3.out'
+      });
+    }
+
+    wrapper.addEventListener('pointerenter', onPointerEnter, { passive: true });
+    wrapper.addEventListener('pointermove', onPointerMove, { passive: true });
+    wrapper.addEventListener('pointerleave', onPointerLeave, { passive: true });
+
+    return function cleanup() {
+      if (leaveTween) {
+        leaveTween.kill();
+        leaveTween = null;
+      }
+      wrapper.removeEventListener('pointerenter', onPointerEnter);
+      wrapper.removeEventListener('pointermove', onPointerMove);
+      wrapper.removeEventListener('pointerleave', onPointerLeave);
+    };
+  }
+
+
+
+  function spawnDriftingCloud(initialProgress = 0) {
+    if (!driftingCloudsRunning || !driftingCloudsLayer || motionPreference.matches || !window.gsap) return;
+    if (activeDriftingClouds.length >= MAX_ACTIVE_CLOUDS) return;
+
+    // Pick asset different from the last one
+    let assetIdx;
+    do {
+      assetIdx = Math.floor(Math.random() * CLOUD_ASSETS.length);
+    } while (assetIdx === lastAssetIndex && CLOUD_ASSETS.length > 1);
+    lastAssetIndex = assetIdx;
+    const asset = CLOUD_ASSETS[assetIdx];
+
+    // Pick altitude lane different from active clouds (upper sky only)
+    const usedLanes = activeDriftingClouds.map(c => c.laneIdx);
+    const availableLanes = [0, 1, 2].filter(idx => !usedLanes.includes(idx));
+    const laneIdx = availableLanes.length ? availableLanes[Math.floor(Math.random() * availableLanes.length)] : (lastLaneIndex + 1) % 3;
+    lastLaneIndex = laneIdx;
+    const lane = ALTITUDE_LANES[laneIdx];
+    const topPct = lane.topPercent + (Math.random() * 2 - 1) * lane.jitter;
+
+    // Create cloud elements with 100% solid opacity
+    const item = document.createElement('div');
+    item.className = 'drifting-cloud-item';
+    item.style.top = `${topPct}%`;
+    item.style.width = `clamp(200px, ${asset.widthVw}vw, 420px)`;
+    item.style.aspectRatio = String(asset.aspect);
+    item.style.opacity = '1';
+
+    const tiltWrapper = document.createElement('div');
+    tiltWrapper.className = 'cloud-tilt-wrapper';
+    tiltWrapper.style.aspectRatio = String(asset.aspect);
+    tiltWrapper.style.opacity = '1';
+
+    const img = document.createElement('img');
+    img.src = asset.src;
+    img.alt = '';
+    img.draggable = false;
+    img.style.aspectRatio = String(asset.aspect);
+    img.style.opacity = '1';
+
+    tiltWrapper.appendChild(img);
+    item.appendChild(tiltWrapper);
+    driftingCloudsLayer.appendChild(item);
+
+    const cleanupTilt = attachCloud3DTilt(tiltWrapper);
+
+    const rect = item.getBoundingClientRect();
+    const cloudWidth = rect.width || (window.innerWidth * (asset.widthVw / 100));
+    const startX = -cloudWidth - 60;
+    const endX = window.innerWidth + 60;
+
+    // Duration: 70 to 160 seconds with perceptible differences between airy and heavy clouds
+    const durationVariance = (Math.random() * 2 - 1) * 12;
+    const totalDuration = Math.max(65, (asset.baseDuration || 110) + durationVariance);
+    const currentStartX = startX + (endX - startX) * initialProgress;
+    const duration = totalDuration * (1 - initialProgress);
+
+    const cloudRecord = {
+      element: item,
+      laneIdx,
+      cleanupTilt,
+      timeline: null
+    };
+    activeDriftingClouds.push(cloudRecord);
+
+    const tl = window.gsap.timeline({
+      onComplete() {
+        removeDriftingCloud(cloudRecord);
+        if (driftingCloudsRunning && activeDriftingClouds.length < MAX_ACTIVE_CLOUDS) {
+          scheduleNextSpawn(4000 + Math.random() * 5000);
+        }
+      }
+    });
+
+    // Horizontal drift - completely opaque (opacity: 1), zero transparency, graceful slow motion
+    tl.fromTo(item, 
+      { x: currentStartX },
+      { x: endX, duration: duration, ease: 'none' },
+      0
+    );
+
+    cloudRecord.timeline = tl;
+
+    // Stagger second cloud when first has progressed ~35-42%
+    if (activeDriftingClouds.length < MAX_ACTIVE_CLOUDS) {
+      const waitTime = (totalDuration * 0.38) * 1000;
+      scheduleNextSpawn(waitTime);
+    }
+  }
+
+  function scheduleNextSpawn(delayMs) {
+    if (cloudSpawnTimer) clearTimeout(cloudSpawnTimer);
+    cloudSpawnTimer = setTimeout(() => {
+      cloudSpawnTimer = null;
+      if (driftingCloudsRunning && activeDriftingClouds.length < MAX_ACTIVE_CLOUDS) {
+        spawnDriftingCloud();
+      }
+    }, delayMs);
+  }
+
+  function removeDriftingCloud(record) {
+    const idx = activeDriftingClouds.indexOf(record);
+    if (idx !== -1) activeDriftingClouds.splice(idx, 1);
+    if (record.cleanupTilt) record.cleanupTilt();
+    if (record.timeline) record.timeline.kill();
+    if (record.element && record.element.parentNode) {
+      record.element.parentNode.removeChild(record.element);
+    }
+  }
+
+  function clearAllDriftingClouds() {
+    if (cloudSpawnTimer) {
+      clearTimeout(cloudSpawnTimer);
+      cloudSpawnTimer = null;
+    }
+    while (activeDriftingClouds.length > 0) {
+      removeDriftingCloud(activeDriftingClouds[0]);
+    }
+    if (driftingCloudsLayer) {
+      driftingCloudsLayer.innerHTML = '';
+    }
+  }
+
+  function startDriftingClouds() {
+    if (driftingCloudsRunning) return;
+    if (motionPreference.matches || !window.gsap) return;
+    driftingCloudsRunning = true;
+    if (activeDriftingClouds.length === 0) {
+      // Spawn initial cloud floating in upper sky (~18% progress) so hero feels alive immediately
+      spawnDriftingCloud(0.18);
+    } else {
+      activeDriftingClouds.forEach(c => {
+        if (c.timeline && c.timeline.paused()) c.timeline.play();
+      });
+    }
+  }
+
+  function pauseDriftingClouds() {
+    activeDriftingClouds.forEach(c => {
+      if (c.timeline) c.timeline.pause();
+    });
+  }
+
+  function resumeDriftingClouds() {
+    if (!driftingCloudsRunning) return;
+    activeDriftingClouds.forEach(c => {
+      if (c.timeline && c.timeline.paused()) c.timeline.play();
+    });
+  }
+
+  function stopDriftingClouds() {
+    driftingCloudsRunning = false;
+    clearAllDriftingClouds();
+  }
+
+  window.__spawnDriftingCloud = spawnDriftingCloud;
+  window.__activeDriftingClouds = activeDriftingClouds;
+  window.__startDriftingClouds = startDriftingClouds;
+  window.__stopDriftingClouds = stopDriftingClouds;
+  window.__startOrbitMotion = startOrbitMotion;
+  window.__showHeroArtworkInstant = showHeroArtworkInstant;
+
   function playGsapChoreography(progress = 0) {
     dropsStaticUploaded = false;
     if (mainTimeline) {
       mainTimeline.kill();
     }
+    killIdleTweens();
 
     setCursorEnabled(false);
     buildWordAndDrops();
     mainTimeline = null;
     const canAnimate = !motionPreference.matches && typeof window.gsap !== 'undefined';
-    replayBtn.hidden = !canAnimate;
+
     if (!canAnimate) {
-      for (const drop of drops) Object.assign(drop, { emerge: 1, flight: 1, absorb: 1, wet: 0, prevFlight: 1, prevAbs: 1 });
+      for (const drop of drops) Object.assign(drop, { emerge: 1, flight: 1, absorb: 1, prevFlight: 1, prevAbs: 1 });
       setCursorEnabled(true);
+      showHeroArtworkInstant();
       return;
     }
+
+    resetHeroArtwork();
 
     // Очерёдность появления и вылета капель:
     // 1) Финальные 8 капель хвоста выбираются из близких/умеренных дистанций к буквам,
@@ -792,7 +1385,7 @@
       // 3) Дальние дистанции (>230px): глубокая инерция и скоростной хлёсткий рывок (power3.in)
       const dist = d.flightDist || Math.hypot(d.sx - d.ax, d.sy - d.ay);
       const distNorm = Math.min(1.0, Math.max(0.0, (dist - 70) / 360));
-      const massFactor = ((d.rDropNorm || 0.5) - 0.5) * 0.12;
+      const massFactor = (d.rDropNorm - 0.5) * 0.12;
       const randFactor = (Math.random() - 0.5) * 0.08;
       const flightDur = Math.max(0.36, Math.min(0.80, 0.40 + distNorm * 0.34 + massFactor + randFactor));
 
@@ -807,7 +1400,7 @@
 
       // В момент касания штриха вся кинетическая энергия полёта мгновенно переходит в растекание
       const tAbsorbStart = tLaunch + flightDur;
-      const baseAbsorb = 0.95 + (d.rDropNorm || (d.rDrop / 13.6)) * 0.22 + Math.random() * 0.14;
+      const baseAbsorb = 0.95 + d.rDropNorm * 0.22 + Math.random() * 0.14;
       let absorbDur = baseAbsorb;
       let absorbEase = absorbEases[rank % absorbEases.length];
 
@@ -826,8 +1419,8 @@
       // Эффект падения капли на страницу (капнула):
       // При ударе о бумагу капля резко расплющивается с сочным всплеском (+16..25% к радиусу),
       // затем упруго поджимается силами поверхностного натяжения и замирает глянцевой каплей
-      const emergeEase = (d.rDropNorm || 0.5) > 0.65 ? 'elastic.out(1.24, 0.42)' : 'elastic.out(1.16, 0.44)';
-      const curEmergeDur = (d.rDropNorm || 0.5) > 0.65 ? 0.46 : 0.42;
+      const emergeEase = d.rDropNorm > 0.65 ? 'elastic.out(1.24, 0.42)' : 'elastic.out(1.16, 0.44)';
+      const curEmergeDur = d.rDropNorm > 0.65 ? 0.46 : 0.42;
 
       mainTimeline.to(d, {
         emerge: 1,
@@ -846,15 +1439,6 @@
         duration: absorbDur,
         ease: absorbEase
       }, tAbsorbStart);
-
-      // Пока участок буквы растекается и сразу после его появления, его грани остаются «мокрыми»
-      // и живо переливаются поверхностным натяжением (wet: 1 -> 0), а в финале стабилизируются в чёткий штрих
-      const wetDur = Math.max(1.20, absorbDur * 0.70);
-      mainTimeline.to(d, {
-        wet: 0,
-        duration: wetDur,
-        ease: 'sine.inOut'
-      }, tAbsorbStart + absorbDur * 0.35);
     }
 
     // Моментальная готовность курсора: активируем курсор точно в момент завершения растекания букв,
@@ -863,9 +1447,15 @@
       setCursorEnabled(true);
     }, null, maxAbsorbEnd);
 
+    const artworkTl = createHeroArtworkTimeline();
+    if (artworkTl) {
+      mainTimeline.add(artworkTl, maxAbsorbEnd);
+    }
+
     mainTimeline.progress(progress);
     if (progress >= 0.999) {
       setCursorEnabled(true);
+      showHeroArtworkInstant();
     }
     if (document.hidden) mainTimeline.pause();
   }
@@ -1171,7 +1761,9 @@
           targetSX = (tanX / tanLen) * stretchFlight;
           targetSY = (tanY / tanLen) * stretchFlight;
         } else if (abs >= 0.001) {
-          const flowStretch = Math.max(0.015, Math.min(0.36, (0.06 + vAbs * 0.22)) * Math.pow(1.0 - abs, 0.75));
+          // Капля остаётся овальной, пока движется по штриху: вытянутость растёт
+          // со скоростью скольжения и хлёстко проявляется в момент удара
+          const flowStretch = Math.min(0.38, 0.06 + vAbs * 0.26 * Math.pow(1.0 - abs, 0.6));
           targetSX = dirX * flowStretch;
           targetSY = dirY * flowStretch;
         }
@@ -1188,8 +1780,8 @@
         dropCoreData[i * 4 + 2] = d.stretchX;
         dropCoreData[i * 4 + 3] = d.stretchY;
 
-        // Вытекающий штрих лежит СТРОГО на точной оси самой буквы (d.ax, d.ay) -> (d.ax + glideX, d.ay + glideY),
-        // без малейшего бокового смещения (baseX - d.ax), чтобы части одного штриха всегда сходились идеально соосно!
+        // Ось заканчивается в центре головы, строго на оси буквы.
+        // Овальный носик строится в шейдере без выступающего продолжения линии.
         if (d.type === 0) {
           dropSegData[i * 4] = d.ax;
           dropSegData[i * 4 + 1] = d.ay;
@@ -1197,26 +1789,22 @@
           dropSegData[i * 4 + 3] = d.ay + glideY;
         } else {
           const a1 = d.a0 + (d.aEnd - d.a0) * abs;
-          const aMid = 0.5 * (d.a0 + a1);
-          const da = 0.5 * Math.abs(a1 - d.a0);
           dropSegData[i * 4] = d.arcCx;
           dropSegData[i * 4 + 1] = d.arcCy;
-          dropSegData[i * 4 + 2] = aMid;
-          dropSegData[i * 4 + 3] = da;
+          dropSegData[i * 4 + 2] = 0.5 * (d.a0 + a1);
+          dropSegData[i * 4 + 3] = 0.5 * Math.abs(a1 - d.a0);
         }
-
-        const currentWet = d.wet;
 
         dropParamsData[i * 4] = rCore;
         dropParamsData[i * 4 + 1] = abs;
-        dropParamsData[i * 4 + 2] = currentWet;
+        dropParamsData[i * 4 + 2] = 0.0;
         dropParamsData[i * 4 + 3] = d.type;
       }
 
       gl.uniform1i(uDropCount, numDrops);
-      gl.uniform4fv(uDropCore, dropCoreData);
-      gl.uniform4fv(uDropSeg, dropSegData);
-      gl.uniform4fv(uDropParams, dropParamsData);
+      gl.uniform4fv(uDropCore, dropCoreData.subarray(0, numDrops * 4));
+      gl.uniform4fv(uDropSeg, dropSegData.subarray(0, numDrops * 4));
+      gl.uniform4fv(uDropParams, dropParamsData.subarray(0, numDrops * 4));
 
       if (!isIntroActive) {
         dropsStaticUploaded = true;
@@ -1434,12 +2022,14 @@
 
     gl.uniform2f(uRes, width, height);
     gl.uniform1f(uDpr, dpr);
-    gl.uniform1f(uTime, now * 0.001);
     gl.uniform1f(uStrokeR, strokeR);
     gl.uniform1f(uYahArcR, yahArcR);
+    gl.uniform1f(uScrollY, window.scrollY || window.pageYOffset || 0);
 
     gl.uniform1i(uCursorCount, cursorSendCount);
-    gl.uniform4fv(uCursorDots, cursorDotsData);
+    if (cursorSendCount > 0) {
+      gl.uniform4fv(uCursorDots, cursorDotsData.subarray(0, cursorSendCount * 4));
+    }
     gl.uniform2f(uCursorDir, Math.cos(pointer.angle), Math.sin(pointer.angle));
     gl.uniform4f(uCursorBBox, cMinX, cMinY, cMaxX, cMaxY);
 
@@ -1448,10 +2038,34 @@
     if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length)) || (cursorRevealTween && cursorRevealTween.isActive())) scheduleRender();
   }
 
+  window.addEventListener('scroll', () => {
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    if (scrollY > 30 && !cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) {
+      setCursorEnabled(true);
+    }
+    if (scrollY > window.innerHeight) {
+      if (scrollDotsActive) stopScrollDotsAnimation();
+      pauseDriftingClouds();
+      if (orbitSwayXTween && orbitSwayXTween.isActive()) orbitSwayXTween.pause();
+      if (orbitSwayYTween && orbitSwayYTween.isActive()) orbitSwayYTween.pause();
+      if (orbitSwayZTween && orbitSwayZTween.isActive()) orbitSwayZTween.pause();
+      if (orbitRunnerTween && orbitRunnerTween.isActive()) orbitRunnerTween.pause();
+    } else if (cursorEnabled) {
+      if (!scrollDotsActive) startScrollDotsAnimation();
+      resumeDriftingClouds();
+      if (orbitSwayXTween && orbitSwayXTween.paused()) orbitSwayXTween.play();
+      if (orbitSwayYTween && orbitSwayYTween.paused()) orbitSwayYTween.play();
+      if (orbitSwayZTween && orbitSwayZTween.paused()) orbitSwayZTween.play();
+      if (orbitRunnerTween && orbitRunnerTween.paused()) orbitRunnerTween.play();
+    }
+    scheduleRender();
+  }, { passive: true });
+
   window.addEventListener('pointermove', (e) => {
     lastPointerX = e.clientX;
     lastPointerY = e.clientY;
-    if (!cursorEnabled || motionPreference.matches || e.target.closest('button')) {
+    if (!cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) setCursorEnabled(true);
+    if (motionPreference.matches || e.target.closest('button, a, .hero-scroll-down')) {
       pointer.leave();
       return;
     }
@@ -1462,7 +2076,8 @@
   window.addEventListener('pointerdown', (e) => {
     lastPointerX = e.clientX;
     lastPointerY = e.clientY;
-    if (!cursorEnabled || motionPreference.matches || e.target.closest('button')) {
+    if (!cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) setCursorEnabled(true);
+    if (motionPreference.matches || e.target.closest('button, a, .hero-scroll-down')) {
       pointer.leave();
       return;
     }
@@ -1518,15 +2133,19 @@
     showFallback();
   });
 
-  if (replayBtn) {
-    replayBtn.addEventListener('click', () => {
-      setCursorEnabled(false);
-      playGsapChoreography();
-      scheduleRender();
+  if (heroScrollDown) {
+    heroScrollDown.addEventListener('click', (e) => {
+      const target = document.getElementById('sculpture-section');
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth' });
+      }
     });
   }
 
   resizeAll();
   hero.classList.add('is-ready');
+  document.body.classList.add('is-ready');
+  canvas.classList.add('is-ready');
   scheduleRender();
 })();
