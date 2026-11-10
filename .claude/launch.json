@@ -5,7 +5,12 @@
       "name": "preview",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8000"],
-      "port": 8000
+      "port": 8000,
+      "autoPort": false
+    },
+    {
+      "name": "attach",
+      "url": "http://localhost:8000"
     }
   ]
 }

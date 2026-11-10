@@ -10,13 +10,11 @@ tools: Bash, PowerShell, Read, Grep, Glob, mcp__Claude_Browser__preview_start, m
 
 Если в задаче не сказано иное, прогони всё по порядку:
 
-1. **Синтаксис.** `node --check` для каждого изменённого JS (`git status --short` покажет какие; если ничего —
-   для `landing.js cloud-relief.js hero-ring.js fluid-cursor.js bust-section.js`). `three.min.js` не проверяй.
-2. **Синхронность.** `diff -q index.html landing.html` — должны совпадать.
-3. **Ссылки.** Все локальные `src=`/`href=` в `index.html` указывают на существующие файлы (путь без `?v=...`).
-   Если CSS/JS изменён по `git diff`, а его `?v=` в HTML не поменялся — отметь.
-4. **В браузере.** `preview_start` с `name: "preview"` (статический сервер на :8000), открыть `/index.html`:
-   - подождать ~6 секунд, чтобы доиграла вступительная анимация;
+1. **Статика.** `bash scripts/check.sh` — синтаксис JS, синхронность HTML, ссылки, `?v=`. Вывод передай как есть.
+2. **В браузере.** `preview_start` с `name: "preview"` (статический сервер на :8000), открыть `/index.html`:
+   - сначала `tabs_context`: если панель скрыта — не жди и не делай скриншоты, сразу верни «панель скрыта, браузер не проверен»;
+   - если :8000 уже отвечает — `preview_start` с `name: "attach"`;
+   - подождать ~12 секунд, чтобы доиграла вступительная анимация;
    - `read_console_messages` с `onlyErrors: true`; `read_network_requests` — нет ли 404;
    - скриншот десктопа; затем `resize_window` preset `mobile`, перезагрузка, ожидание, скриншот;
    - вернуть `resize_window` preset `desktop`.
@@ -27,9 +25,7 @@ tools: Bash, PowerShell, Read, Grep, Glob, mcp__Claude_Browser__preview_start, m
 
 Отчёт, коротко:
 ```
-Синтаксис: OK | FAIL (файл:строка — первая строка ошибки)
-HTML sync: OK | FAIL
-Ссылки/?v: OK | список проблем
+check.sh: OK | строки FAIL
 Браузер: OK | ошибки консоли (первые 3), 404, что видно на скриншоте (1 строка на десктоп и мобильный)
 Не проверено: …
 ```
