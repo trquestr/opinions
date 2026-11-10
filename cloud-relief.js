@@ -494,7 +494,7 @@
           // Golden ratio angle spiral distribution for organic spread around cursor
           const spawnAngle = totalIdx * 2.399963;
           const spawnRadius = 0.06 + (totalIdx % 5) * 0.038;
-          const spawnDelay = totalIdx * 0.028; // Staggered detachment sequence
+          const spawnDelay = totalIdx * 0.040; // Ступенчатый отрыв: последняя капля стартует при swarmActive ≈ 0.68 (~0.18 с)
 
           this.swarmDroplets.push({
             mesh: dMesh,
@@ -757,7 +757,21 @@
       if (this.swarmDroplets && this.swarmDroplets.length > 0) {
         const isHovered = this.isInsideSilhouette;
         this.targetSwarmActive = isHovered ? 1.0 : 0.0;
-        const swarmEase = this.targetSwarmActive > 0.5 ? 0.055 : 0.20;
+        // Появление роя под курсором ~0.37 с до 90% (было 0.055 ≈ 0.7 с); сам уход на орбиту — migInFactor, он медленный
+        const swarmEase = this.targetSwarmActive > 0.5 ? 0.10 : 0.20;
+
+        // Новый заход на облако: капли, которые уже почти вернулись в «лужу» (migration < 0.5),
+        // перерождаются под текущим курсором с нуля, а не долетают до старой точки входа
+        if (isHovered && !this._swarmWasHovered) {
+          for (let i = 0; i < this.swarmDroplets.length; i++) {
+            const d = this.swarmDroplets[i];
+            if (d.migration < 0.5) {
+              d.migration = 0.0;
+              d.currentScale = 0.0;
+            }
+          }
+        }
+        this._swarmWasHovered = isHovered;
         this.swarmActive += (this.targetSwarmActive - this.swarmActive) * (1 - Math.pow(1 - swarmEase, dt * 60));
         this.swarmActive = Math.max(0.0, Math.min(1.0, this.swarmActive));
         if (this.targetSwarmActive === 0.0 && this.swarmActive < 0.02) {
@@ -777,10 +791,10 @@
 
           // Коэффициенты затухания зависят только от dt — считаем раз за кадр, а не на каждую каплю
           const dtF = dt * 60;
-          const migInFactor = 1 - Math.pow(1 - 0.050, dtF);
+          const migInFactor = 1 - Math.pow(1 - 0.050, dtF); // плавный уход на орбиту ~0.75 с до 90%
           const migOutFactor = 1 - Math.pow(1 - 0.20, dtF);
           const deflectFactor = 1 - Math.pow(0.88, dtF);
-          const scaleFactor = 1 - Math.pow(0.92, dtF);
+          const scaleFactor = 1 - Math.pow(0.80, dtF); // проявление капли под курсором ~0.17 с до 90%, видна уже со 2–3 кадра
 
           for (let i = 0; i < this.swarmDroplets.length; i++) {
             const d = this.swarmDroplets[i];
@@ -799,10 +813,11 @@
             const yOrbit = xPrime * Math.sin(ring.alpha) + yPrime * Math.cos(ring.alpha);
             const zOrbit = zPrime;
 
-            // Anchor detachment origin at cursor puddle when starting to migrate
+            // Точка отрыва — под реальным курсором (mouseLocal), а не под пружинным currentMouseLocal:
+            // пружина вне облака замирает в точке выхода и при новом заходе тащит «лужу» со старого места
             if (isHovered && d.migration < 0.001) {
-              d.originX = mx + Math.cos(d.spawnAngle) * d.spawnRadius;
-              d.originY = my + Math.sin(d.spawnAngle) * d.spawnRadius;
+              d.originX = this.mouseLocal.x + Math.cos(d.spawnAngle) * d.spawnRadius;
+              d.originY = this.mouseLocal.y + Math.sin(d.spawnAngle) * d.spawnRadius;
               d.originZ = 0.05;
             }
 
@@ -853,8 +868,13 @@
             );
 
             // Organic scale: droplet blooms as it detaches from cursor puddle
+            // Под курсором капля сразу видна на 55% размера и дорастает при отрыве.
+            // При наведении цель не умножается на сглаженный swarmActive: иначе три каскадных
+            // сглаживания (swarmActive × bloom × scaleFactor) дают «мёртвый старт» ~150 мс,
+            // когда капли меньше 7% и их не видно. На уходе swarmActive по-прежнему гасит рой.
             const bloom = Math.min(1.0, m * 2.2);
-            const targetScale = d.baseRadius * this.swarmActive * Math.min(1.0, 0.20 + bloom * 0.80);
+            const presence = isHovered ? 1.0 : this.swarmActive;
+            const targetScale = d.baseRadius * presence * (0.55 + bloom * 0.45);
             d.currentScale += (targetScale - d.currentScale) * scaleFactor;
             d.currentScale = Math.max(0.0, d.currentScale);
             const sc = Math.max(0.0001, d.currentScale);
