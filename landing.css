@@ -1,3 +1,21 @@
+@font-face {
+  font-family: 'Untesis';
+  src: url('assets/fonts/Untesis.woff2') format('woff2'),
+       url('assets/fonts/Untesis.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Untesis Display';
+  src: url('assets/fonts/Untesis-Display.woff2') format('woff2'),
+       url('assets/fonts/Untesis-Display.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -92,10 +110,21 @@ html, body {
   backface-visibility: hidden;
 }
 
+.cloud-relief-canvas {
+  position: absolute;
+  top: -25%;
+  left: -20%;
+  width: 140% !important;
+  height: 150% !important;
+  display: block;
+  pointer-events: auto;
+}
+
 /* 3D Tilt & Drifting Clouds (Upper Sky, 100% Opaque, Behind Text) */
 .cloud-tilt-wrapper {
   position: relative;
   width: 100%;
+  overflow: visible;
   transform-style: preserve-3d;
   perspective: 900px;
   pointer-events: auto;
@@ -104,7 +133,6 @@ html, body {
   will-change: transform;
   filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.07));
   transition: filter 0.35s ease;
-  opacity: 1;
 }
 
 .cloud-tilt-wrapper:hover {
@@ -118,7 +146,6 @@ html, body {
   user-select: none;
   -webkit-user-drag: none;
   pointer-events: none;
-  opacity: 1;
 }
 
 .drifting-clouds-layer {
@@ -136,15 +163,12 @@ html, body {
   top: 0;
   left: 0;
   pointer-events: none;
-  opacity: 1;
   will-change: transform;
-  transform: translate3d(0, 0, 0);
 }
 
 .drifting-cloud-item .cloud-tilt-wrapper {
   pointer-events: auto;
 }
-
 
 /* Base orbital path styles */
 .hero-orbit-path {
@@ -167,40 +191,24 @@ html, body {
 }
 
 .hero-dashes-ellipse {
-  fill: none;
   stroke: rgba(0, 0, 0, 0.28);
-  stroke-width: 0.25px;
   stroke-dasharray: 930 80;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
 }
 
 .hero-dashes-large {
-  fill: none;
   stroke: rgba(0, 0, 0, 0.25);
-  stroke-width: 0.25px;
   stroke-dasharray: 1180 80;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
 }
 
-.is-active-orbits .hero-dashes-axis,
-.hero-axis-svg.is-active-orbits .hero-dashes-axis,
-.hero-composition.is-active-orbits .hero-dashes-axis {
+.is-active-orbits .hero-dashes-axis {
   animation: floatDashesAxis 30s linear infinite;
 }
 
-.is-active-orbits .hero-dashes-ellipse,
-.hero-orbits.is-active-orbits .hero-dashes-ellipse,
-.hero-composition.is-active-orbits .hero-dashes-ellipse {
+.is-active-orbits .hero-dashes-ellipse {
   animation: floatDashesEllipse 42s linear infinite;
 }
 
-.is-active-orbits .hero-dashes-large,
-.hero-orbits.is-active-orbits .hero-dashes-large,
-.hero-composition.is-active-orbits .hero-dashes-large {
+.is-active-orbits .hero-dashes-large {
   animation: floatDashesLarge 44s linear infinite;
 }
 
@@ -265,6 +273,8 @@ html, body {
 
 /* The heading remains readable before scripts load or when WebGL is unavailable. */
 .wordmark {
+  font-family: 'Untesis', 'Untesis Display', sans-serif;
+  font-synthesis: none;
   font-size: clamp(24px, 12vw, 134px);
   font-weight: 200;
   line-height: 1;
@@ -274,7 +284,6 @@ html, body {
 }
 
 .is-ready .gl-layer,
-body.is-ready .gl-layer,
 .gl-layer.is-ready { visibility: visible; }
 .is-ready .wordmark {
   position: absolute;
@@ -436,4 +445,11 @@ body.is-ready .gl-layer,
   height: 100%;
   display: block;
   touch-action: none;
+}
+
+@media (max-width: 480px) {
+  .wordmark {
+    letter-spacing: 0.2em;
+    padding-left: 0.2em;
+  }
 }

@@ -3,11 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>МНЕНИЯ</title>
-  <link rel="stylesheet" href="landing.css?v=3">
+  <title>UNTESIS</title>
+  <link rel="preload" href="assets/fonts/Untesis.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="landing.css?v=23">
+  <script defer src="three.min.js"></script>
+  <script defer src="cloud-relief.js?v=20"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-  <script defer src="landing.js"></script>
-  <script defer src="bust-section.js"></script>
+  <script defer src="landing.js?v=26"></script>
+  <script defer src="bust-section.js?v=2"></script>
 </head>
 <body>
   <main class="hero">
@@ -51,7 +54,7 @@
     <!-- Drifting Clouds Layer: floating over hero text -->
     <div class="drifting-clouds-layer" id="drifting-clouds-layer" aria-hidden="true"></div>
 
-    <h1 class="wordmark">МНЕНИЯ</h1>
+    <h1 class="wordmark">UNTESIS</h1>
 
     <!-- Scroll Down Prompt -->
     <a href="#sculpture-section" class="hero-scroll-down" id="hero-scroll-down" aria-label="Скролл вниз">
@@ -68,6 +71,7 @@
   <section class="sculpture-section" id="sculpture-section">
     <canvas id="bust-canvas" class="bust-canvas" aria-label="Интерактивный точечный бюст Давида"></canvas>
   </section>
+
 
   <canvas id="gl-canvas" class="gl-layer" aria-hidden="true"></canvas>
 </body>

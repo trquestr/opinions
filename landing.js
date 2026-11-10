@@ -51,7 +51,7 @@
   let height = window.innerHeight;
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-  const MAX_DROPS = 108;
+  const MAX_DROPS = 140;
   const MAX_CURSOR_DOTS = 256;
 
   // ==========================================================================
@@ -70,14 +70,13 @@
     uniform vec2 u_res;
     uniform float u_dpr;
     uniform float u_strokeR;
-    uniform float u_yahArcR;
     uniform float u_scrollY;
 
     // Капли и постепенно вытекающие из них штрихи (1 капля = 1 уникальный участок буквы)
     uniform int u_dropCount;
     uniform vec4 u_dropCore[${MAX_DROPS}];   // (cx, cy, stretchDirX, stretchDirY) овально-каплевидного ядра точки
-    uniform vec4 u_dropSeg[${MAX_DROPS}];    // type 0: (startX, startY, tipX, tipY), type 1: (arcCx, arcCy, aMid, da)
-    uniform vec4 u_dropParams[${MAX_DROPS}]; // (rCore, absorb, 0, segType)
+    uniform vec4 u_dropSeg[${MAX_DROPS}];    // (startX, startY, tipX, tipY) прямого участка штриха
+    uniform vec4 u_dropParams[${MAX_DROPS}]; // (rCore, absorb, 0, 0)
     uniform vec4 u_textBBox;                 // (minX, minY, maxX, maxY) буквы «МНЕНИЯ»
 
     // Скрытые точки под курсором
@@ -100,28 +99,11 @@
       float sx = 1.0 + stretch;
       float sy = inversesqrt(1.0 + stretch * 0.85);
 
-      // Каплевидный профиль: круглая головка спереди (qx > 0) и вогнуто сужающийся хвостик
-      // сзади (qx < 0). Сужение — гладкая кривая с горизонтальной касательной в широкой
-      // точке: нет ни излома на макушке, ни прямых конических стенок
       float rear = clamp(-qx / max(0.001, r * sx), 0.0, 1.0);
       float taper = min(0.24, stretch * 0.5) * rear * rear * (3.0 - 2.0 * rear);
 
       vec2 qScaled = vec2(qx / sx, qy / (sy * (1.0 - taper)));
       return (length(qScaled) - r) * min(sx, sy);
-    }
-
-    // Точное расстояние до дуги окружности с центром c, радиусом r, средним углом aMid и полураствором da
-    float sdArc(vec2 p, vec2 c, float r, float aMid, float da) {
-      vec2 d = p - c;
-      vec2 u = vec2(cos(aMid), sin(aMid));
-      vec2 v = vec2(-u.y, u.x);
-      vec2 q = vec2(dot(d, u), abs(dot(d, v)));
-      float s = sin(da);
-      float cs = cos(da);
-      if (q.x * s > q.y * cs) {
-        return abs(length(q) - r);
-      }
-      return length(q - vec2(cs, s) * r);
     }
 
     float smin(float a, float b, float k) {
@@ -130,16 +112,7 @@
       return min(a, b) - h * h * k * 0.25;
     }
 
-    const float PI_C = 3.14159265;
-    const float TWO_PI_C = 6.28318531;
-
-    float wrapPi(float a) {
-      return mod(a + PI_C, TWO_PI_C) - PI_C;
-    }
-
     // Вогнутая шейка: горизонтальная касательная у головки и у тонкого хвоста.
-    // Ось заканчивается в центре головы; полный эллипс сохраняет её заднюю
-    // половину даже при коротком штрихе в первые кадры контакта.
     float dropFlowRadius(float x, float xc, float rHead, float alive) {
       float neck = max(0.001, min(xc, rHead * 3.3));
       float u = clamp((xc - x) / neck, 0.0, 1.0);
@@ -164,7 +137,7 @@
       float dCores = 1e5;
       float dStrokes = 1e5;
 
-      // Быстрое отсечение: если пиксель далеко от букв, пропускаем весь цикл 108 участков
+      // Быстрое отсечение: если пиксель далеко от букв, пропускаем весь цикл участков
       if (pText.x >= u_textBBox.x && pText.x <= u_textBBox.z &&
           pText.y >= u_textBBox.y && pText.y <= u_textBBox.w) {
         for (int i = 0; i < ${MAX_DROPS}; i++) {
@@ -172,7 +145,6 @@
           vec4 params = u_dropParams[i];
           float rCore = params.x;
           float absorb = params.y;
-          float segType = params.w;
 
           if (rCore <= 0.01 && absorb <= 0.001) continue;
 
@@ -182,58 +154,28 @@
           vec2 dir = stretch > 0.0001 ? (sVec / stretch) : vec2(1.0, 0.0);
 
           if (absorb <= 0.001) {
-            // Полёт: капли в воздухе объединяются в жидкое метаболл-облако dCores
             if (rCore > 0.01) {
               float dDrop = sdDroplet(pText, core.xy, dir, rCore, stretch);
               float kCore = min(9.5, rCore * 1.45);
               dCores = smin(dCores, dDrop, kCore);
             }
           } else {
-            // Растекание по штриху: ось заканчивается в центре овальной головы.
-            // Полный овал дополняет шейку: короткий хвост не обрезает заднюю половину.
             vec4 seg = u_dropSeg[i];
             float sy = inversesqrt(1.0 + 0.85 * stretch);
             float rHead = max(rCore * sy, u_strokeR);
-            // Головка держит полную форму, пока заметно шире штриха,
-            // и растворяется только в самом конце участка
             float alive = clamp((rHead - u_strokeR) / (0.30 * rHead + 0.001), 0.0, 1.0);
-            float dOwn;
-
-            if (segType < 0.5) {
-              vec2 ba = seg.zw - seg.xy;
-              float len2 = dot(ba, ba);
-              float len = sqrt(len2);
-              vec2 axis = len > 0.0001 ? ba / len : dir;
-              float along = dot(pText - seg.xy, axis);
-              float x = clamp(along, 0.0, len);
-              float dAxis = length(pText - (seg.xy + axis * x));
-              vec2 q = vec2(along - len, dot(pText - seg.zw, vec2(-axis.y, axis.x)));
-              float dHead = dropFlowHead(q, rHead, stretch, alive);
-              float neckBlend = rHead * 0.3 * alive * smoothstep(0.0, rHead * 0.5, -q.x);
-              dOwn = q.x >= 0.0 ? dHead
-                : smin(dHead, dAxis - dropFlowRadius(x, len, rHead, alive), neckBlend);
-            } else {
-              float dAxis = sdArc(pText, seg.xy, u_yahArcR, seg.z, seg.w);
-              float da = abs(seg.w);
-              // Голова — тот конец дуги, возле которого фактически лежит центр капли
-              float aHead = atan(core.y - seg.y, core.x - seg.x);
-              float s = abs(wrapPi(aHead - seg.z - da)) < abs(wrapPi(aHead - seg.z + da)) ? 1.0 : -1.0;
-              float a0 = seg.z - s * da;
-              float L = 2.0 * da * u_yahArcR;
-              float ang = atan(pText.y - seg.y, pText.x - seg.x);
-              float x = clamp(s * wrapPi(ang - a0) * u_yahArcR, 0.0, L);
-              float aTip = seg.z + s * da;
-              vec2 normal = vec2(cos(aTip), sin(aTip));
-              vec2 tangent = s * vec2(-normal.y, normal.x);
-              vec2 fromHead = pText - (seg.xy + normal * u_yahArcR);
-              vec2 q = vec2(dot(fromHead, tangent), dot(fromHead, normal));
-              float dHead = dropFlowHead(q, rHead, stretch, alive);
-              float neckBlend = rHead * 0.3 * alive * smoothstep(0.0, rHead * 0.5, -q.x);
-              dOwn = q.x >= 0.0 ? dHead
-                : smin(dHead, dAxis - dropFlowRadius(x, L, rHead, alive), neckBlend);
-            }
-
-            // Чистый min без smin между отдельными штрихами, чтобы стыки букв оставались строгими
+            vec2 ba = seg.zw - seg.xy;
+            float len2 = dot(ba, ba);
+            float len = sqrt(len2);
+            vec2 axis = len > 0.0001 ? ba / len : dir;
+            float along = dot(pText - seg.xy, axis);
+            float x = clamp(along, 0.0, len);
+            float dAxis = length(pText - (seg.xy + axis * x));
+            vec2 q = vec2(along - len, dot(pText - seg.zw, vec2(-axis.y, axis.x)));
+            float dHead = dropFlowHead(q, rHead, stretch, alive);
+            float neckBlend = rHead * 0.3 * alive * smoothstep(0.0, rHead * 0.5, -q.x);
+            float dOwn = q.x >= 0.0 ? dHead
+              : smin(dHead, dAxis - dropFlowRadius(x, len, rHead, alive), neckBlend);
             dStrokes = min(dStrokes, dOwn);
           }
         }
@@ -254,12 +196,10 @@
           float stretch = cd.w;
           vec2 c = cd.xy;
 
-          // Быстрое пространственное отсечение далеких точек для высокой производительности и плавности
           vec2 dp = p - c;
           float limit = r * (1.0 + stretch) + 20.0;
           if (abs(dp.x) > limit || abs(dp.y) > limit) continue;
 
-          // Субпиксельное затухание max(0.0, aa - r) гарантирует полное и непрерывное исчезновение капли в 0%
           float dDot = sdDroplet(p, c, u_cursorDir, r, stretch * 0.65) + max(0.0, aa - r);
           float w = clamp(0.5 - 0.5 * (dDot - dCursor) / 13.0, 0.0, 1.0);
           dCursor = smin(dCursor, dDot, 13.0);
@@ -267,10 +207,6 @@
         }
       }
 
-      // Адаптивный флюидный метаболл между буквой и каплями курсора:
-      // пока капля крупная, kGoo = 6.5 дает сочный жидкий перешеек;
-      // когда капля растворяется к 0, kGoo непрерывно уменьшается до 0,
-      // поэтому капля плавно и бесследно втекает в букву без остаточного бугорка!
       float kGoo = max(0.0, min(6.5, rCursor * 1.3));
       float d = smin(dText, dCursor, kGoo);
 
@@ -324,7 +260,6 @@
   const uRes = gl.getUniformLocation(prog, 'u_res');
   const uDpr = gl.getUniformLocation(prog, 'u_dpr');
   const uStrokeR = gl.getUniformLocation(prog, 'u_strokeR');
-  const uYahArcR = gl.getUniformLocation(prog, 'u_yahArcR');
 
   const uDropCount = gl.getUniformLocation(prog, 'u_dropCount');
   const uDropCore = gl.getUniformLocation(prog, 'u_dropCore');
@@ -350,7 +285,6 @@
   // ГЕОМЕТРИЯ СЛОВА «МНЕНИЯ» И КАПИЛЛЯРНЫХ КАПЕЛЬ
   // ==========================================================================
   let strokeR = 1.15;
-  let yahArcR = 24;
   let drops = [];
   let mainTimeline = null;
 
@@ -366,31 +300,60 @@
     return 3 * u * u * (p1 - p0) + 6 * u * t * (p2 - p1) + 3 * t * t * (p3 - p2);
   }
 
+  function sampleBezier(p0, p1, p2, p3, steps) {
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const u = 1 - t;
+      const x = u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0];
+      const y = u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1];
+      pts.push([x, y]);
+    }
+    return pts;
+  }
+
   function buildWordAndDrops() {
-    const H = Math.max(1, Math.min(width * 0.12, (width - 40) / 7.02, height * 0.28, 134));
+    const H = Math.max(1, Math.min(width * 0.11, (width - 40) / 5.9, height * 0.26, 130));
     strokeR = Math.max(0.95, H * 0.0095);
-    const tracking = H * 0.58;
+    const tracking = H * 0.46;
 
-    // Адаптивный масштаб размера точек под экраны десктопа, планшета и мобильного:
-    // На Desktop (H=134) dotScale = 1.0 (3.2..10.0px)
-    // На Tablet (H~90)   dotScale ≈ 0.79 (2.5..7.9px)
-    // На Mobile (H~47)   dotScale ≈ 0.54 (1.7..5.4px)
-    const dotScale = Math.max(0.48, Math.min(1.0, 0.45 + 0.55 * Math.pow((H - 35) / (134 - 35), 0.85)));
+    // Scale droplet radii proportionally with cap height
+    const dotScale = Math.max(0.48, Math.min(1.0, 0.45 + 0.55 * Math.pow(Math.max(0, (H - 35) / (134 - 35)), 0.85)));
 
+    // Approved Untesis Display geometry: Couture waist + Approved Squircle Chamfer S
     const letterSpecs = [
-      { ch: 'М', w: 0.88 },
-      { ch: 'Н', w: 0.68 },
-      { ch: 'Е', w: 0.56 },
-      { ch: 'Н', w: 0.68 },
-      { ch: 'И', w: 0.68 },
-      { ch: 'Я', w: 0.64 }
+      { ch: 'U', w: 0.82 },
+      { ch: 'N', w: 0.38 },
+      { ch: 'T', w: 0.48 },
+      { ch: 'E', w: 0.36 },
+      { ch: 'S', w: 0.46 },
+      { ch: 'I', w: 0.12 },
+      { ch: 'S', w: 0.46 }
     ];
 
-    const totalW = letterSpecs.reduce((acc, l) => acc + l.w * H, 0) + tracking * (letterSpecs.length - 1);
+    // Optical kerning pairs to eliminate whitespace voids
+    const pairKern = {
+      'UN': -0.04 * H,
+      'NT': -0.05 * H,
+      'TE': -0.05 * H,
+      'ES': -0.02 * H,
+      'SI': -0.03 * H,
+      'IS': -0.03 * H
+    };
+
+    let totalW = 0;
+    for (let i = 0; i < letterSpecs.length; i++) {
+      totalW += letterSpecs[i].w * H;
+      if (i < letterSpecs.length - 1) {
+        const pair = letterSpecs[i].ch + letterSpecs[i + 1].ch;
+        totalW += tracking + (pairKern[pair] || 0);
+      }
+    }
+
     let curX = (width - totalW) * 0.5;
     const topY = (height - H) * 0.5;
 
-    // Границы слова «МНЕНИЯ» с запасом под толщину штриха и капиллярный мениск
+    // Text bounding box for droplet collision / repulsion
     const textPad = 28.0;
     textBBox.minX = curX - textPad;
     textBBox.minY = topY - textPad;
@@ -400,12 +363,11 @@
 
     const subSegments = [];
 
-    // Разбивает прямой штрих [x0,y0 -> x1,y1] на неперекрывающиеся участки с РАЗНЫМИ точками входа
+    // Adds a straight segment divided into multiple parts for uniform droplet targets
     const addStroke = (x0, y0, x1, y1, parts) => {
       if (parts <= 1) {
         const flip = Math.random() < 0.5;
         subSegments.push({
-          type: 0,
           ax: flip ? x1 : x0,
           ay: flip ? y1 : y0,
           bx: flip ? x0 : x1,
@@ -414,11 +376,10 @@
         return;
       }
 
-      // Генерируем parts - 1 точек сечения вдоль штриха без перекрытий
       const cuts = [];
       for (let p = 1; p < parts; p++) {
         const base = p / parts;
-        const jitter = (Math.random() - 0.5) * (0.40 / parts);
+        const jitter = (Math.random() - 0.5) * (0.35 / parts);
         cuts.push(base + jitter);
       }
       cuts.sort((a, b) => a - b);
@@ -433,11 +394,24 @@
         const pBy = y0 + (y1 - y0) * tB;
         const flip = Math.random() < 0.5;
         subSegments.push({
-          type: 0,
           ax: flip ? pBx : pAx,
           ay: flip ? pBy : pAy,
           bx: flip ? pAx : pBx,
           by: flip ? pAy : pBy
+        });
+      }
+    };
+
+    const addPolyline = (pts) => {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const flip = Math.random() < 0.5;
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        subSegments.push({
+          ax: flip ? p1[0] : p0[0],
+          ay: flip ? p1[1] : p0[1],
+          bx: flip ? p0[0] : p1[0],
+          by: flip ? p0[1] : p1[1]
         });
       }
     };
@@ -450,73 +424,67 @@
       const xM = curX + lw * 0.5;
       const yT = topY;
       const yB = topY + H;
-      const yM = topY + H * 0.50;
 
-      if (ch === 'М') {
-        addStroke(xL, yB, xL, yT, 5);
-        addStroke(xL, yT, xM, yB - H * 0.14, 4);
-        addStroke(xM, yB - H * 0.14, xR, yT, 4);
-        addStroke(xR, yT, xR, yB, 5);
-      } else if (ch === 'Н') {
+      if (ch === 'U') {
+        const r = lw * 0.5;
+        const yCurve = yB - r;
+        addStroke(xL, yT, xL, yCurve, 4);
+        addStroke(xR, yT, xR, yCurve, 4);
+
+        // 24 fine segments for U bowl eliminate low-poly chord kinks when assembled from dots
+        const uPts = [];
+        const uSteps = 24;
+        for (let s = 0; s <= uSteps; s++) {
+          const a = Math.PI + (s / uSteps) * Math.PI;
+          uPts.push([xM + Math.cos(a) * r, yCurve - Math.sin(a) * r]);
+        }
+        addPolyline(uPts);
+      } else if (ch === 'N') {
         addStroke(xL, yT, xL, yB, 5);
+        addStroke(xL, yT, xR, yB, 5);
         addStroke(xR, yT, xR, yB, 5);
-        addStroke(xL, yM, xR, yM, 3);
-      } else if (ch === 'Е') {
+      } else if (ch === 'T') {
+        addStroke(xL, yT, xR, yT, 5);
+        addStroke(xM, yT, xM, yB, 6);
+      } else if (ch === 'E') {
+        const yWaist = yT + H * 0.375;
         addStroke(xL, yT, xL, yB, 5);
         addStroke(xL, yT, xR, yT, 3);
-        addStroke(xL, yM, xL + lw * 0.86, yM, 3);
+        addStroke(xL, yWaist, xL + lw * 0.80, yWaist, 3);
         addStroke(xL, yB, xR, yB, 3);
-      } else if (ch === 'И') {
-        addStroke(xL, yT, xL, yB, 5);
-        addStroke(xL, yB, xR, yT, 5);
-        addStroke(xR, yT, xR, yB, 5);
-      } else if (ch === 'Я') {
-        addStroke(xR, yT, xR, yB, 5);
-
-        const bowlH = H * 0.54;
-        yahArcR = bowlH * 0.5;
-        const arcCx = xL + yahArcR + H * 0.02;
-        const arcCy = yT + yahArcR;
-
-        // Верхняя и нижняя перекладины головки «Я»
-        addStroke(arcCx, yT, xR, yT, 3);
-        addStroke(arcCx, yT + bowlH, xR, yT + bowlH, 3);
-
-        // Полукруглая дуга «Я»: 4 четверти дуги (капли входят с разных сторон и сходятся навстречу)
-        subSegments.push({
-          type: 1,
-          arcCx, arcCy, a0: Math.PI, aEnd: Math.PI * 1.25,
-          ax: arcCx - yahArcR, ay: arcCy,
-          bx: arcCx + Math.cos(Math.PI * 1.25) * yahArcR, by: arcCy + Math.sin(Math.PI * 1.25) * yahArcR
-        });
-        subSegments.push({
-          type: 1,
-          arcCx, arcCy, a0: Math.PI * 1.5, aEnd: Math.PI * 1.25,
-          ax: arcCx, ay: arcCy - yahArcR,
-          bx: arcCx + Math.cos(Math.PI * 1.25) * yahArcR, by: arcCy + Math.sin(Math.PI * 1.25) * yahArcR
-        });
-        subSegments.push({
-          type: 1,
-          arcCx, arcCy, a0: Math.PI, aEnd: Math.PI * 0.75,
-          ax: arcCx - yahArcR, ay: arcCy,
-          bx: arcCx + Math.cos(Math.PI * 0.75) * yahArcR, by: arcCy + Math.sin(Math.PI * 0.75) * yahArcR
-        });
-        subSegments.push({
-          type: 1,
-          arcCx, arcCy, a0: Math.PI * 0.5, aEnd: Math.PI * 0.75,
-          ax: arcCx, ay: arcCy + yahArcR,
-          bx: arcCx + Math.cos(Math.PI * 0.75) * yahArcR, by: arcCy + Math.sin(Math.PI * 0.75) * yahArcR
-        });
-
-        // Диагональная ножка «Я»
-        addStroke(arcCx + H * 0.04, yT + bowlH, xL, yB, 4);
+      } else if (ch === 'S') {
+        // The APPROVED Squircle Chamfer S (Option 3)
+        const sCoords = [
+          [0.935, 0.222],
+          [0.935, 0.050],
+          [0.870, 0.008],
+          [0.109, 0.008],
+          [0.043, 0.050],
+          [0.043, 0.319],
+          [0.957, 0.569],
+          [0.957, 0.950],
+          [0.891, 0.992],
+          [0.130, 0.992],
+          [0.065, 0.950],
+          [0.065, 0.778]
+        ];
+        const sEdgeParts = [2, 1, 3, 1, 2, 4, 2, 1, 3, 1, 2];
+        for (let e = 0; e < sCoords.length - 1; e++) {
+          const pA = [xL + sCoords[e][0] * lw, yT + sCoords[e][1] * H];
+          const pB = [xL + sCoords[e + 1][0] * lw, yT + sCoords[e + 1][1] * H];
+          addStroke(pA[0], pA[1], pB[0], pB[1], sEdgeParts[e]);
+        }
+      } else if (ch === 'I') {
+        addStroke(xM, yT, xM, yB, 6);
       }
 
       curX += lw + tracking;
+      if (li < letterSpecs.length - 1) {
+        const pair = ch + letterSpecs[li + 1].ch;
+        curX += pairKern[pair] || 0;
+      }
     }
 
-    // Минимальная дистанция появления от конечной точки штриха (буквы):
-    // даёт каплям достаточный разбег для плавного разгона без залипания и рывков
     const minSpawnDist = Math.max(70, Math.min(Math.min(width, height) * 0.16, 135));
     const margin = Math.max(16, Math.min(28, width * 0.04));
 
@@ -536,17 +504,9 @@
 
       // Единичный вектор направления растекания внутри самой буквы (ux, uy):
       // капля должна прилетать с обратной стороны (-ux, -uy) и входить в штрих ПО КАСАТЕЛЬНОЙ в том же направлении!
-      let ux = 0;
-      let uy = 1;
-      if (seg.type === 0) {
-        const sLen = Math.hypot(seg.bx - seg.ax, seg.by - seg.ay) || 1;
-        ux = (seg.bx - seg.ax) / sLen;
-        uy = (seg.by - seg.ay) / sLen;
-      } else {
-        const dirSign = seg.aEnd >= seg.a0 ? 1 : -1;
-        ux = -Math.sin(seg.a0) * dirSign;
-        uy = Math.cos(seg.a0) * dirSign;
-      }
+      const sLen = Math.hypot(seg.bx - seg.ax, seg.by - seg.ay) || 1;
+      const ux = (seg.bx - seg.ax) / sLen;
+      const uy = (seg.by - seg.ay) / sLen;
 
       // Точка рождается в узком секторе позади направления штриха (-ux, -uy) и летит по ПРЯМОЙ линии к (ax, ay),
       // чтобы не было ни извилистых дуг в воздухе, ни резкого перелома направления при втекании в букву
@@ -590,7 +550,6 @@
       }
 
       drops.push({
-        type: seg.type,
         sx,
         sy,
         cx1,
@@ -601,15 +560,10 @@
         ay: seg.ay,
         bx: seg.bx,
         by: seg.by,
-        arcCx: seg.arcCx || 0,
-        arcCy: seg.arcCy || 0,
-        a0: seg.a0 || 0,
-        aEnd: seg.aEnd || 0,
         flowUx: ux,
         flowUy: uy,
         rDrop,
         rDropNorm: rDrop / (10.0 * dotScale),
-        radial,
         flightDist: dist,
         seed: i * 2.39996 + Math.random() * 10.0,
         // Анимируемые через GSAP параметры:
@@ -637,10 +591,24 @@
   ];
 
   let scrollDotsTimeline = null;
+  let scrollDotsDelayedCall = null; // пауза 0.45с между циклами — храним, чтобы stop убивал её
   let scrollDotsActive = false;
+  // Положение относительно первого экрана по последнему scroll-событию: null — неизвестно (применить заново),
+  // true — ниже сгиба (анимации на паузе), false — выше (анимации идут). Сбрасывается в null при пересоздании твинов.
+  let scrollBelowFold = null;
+
+  // Тайминги цикла точек: появление по очереди сверху вниз, затем стекание вниз с затуханием
+  const DOT_APPEAR_DUR = [0.48, 0.46, 0.42];
+  const DOT_APPEAR_AT = [0.0, 0.28, 0.54];
+  const DOT_FADE_AT = [1.76, 1.96, 2.16];
+  const DOT_FADE_DUR = 0.44;
 
   function stopScrollDotsAnimation() {
     scrollDotsActive = false;
+    if (scrollDotsDelayedCall) {
+      scrollDotsDelayedCall.kill();
+      scrollDotsDelayedCall = null;
+    }
     if (scrollDotsTimeline) {
       scrollDotsTimeline.kill();
       scrollDotsTimeline = null;
@@ -703,61 +671,33 @@
       scrollDotsTimeline = window.gsap.timeline({
         onComplete() {
           if (scrollDotsActive) {
-            window.gsap.delayedCall(0.45, playNextCycle);
+            scrollDotsDelayedCall = window.gsap.delayedCall(0.45, playNextCycle);
           }
         }
       });
 
       // 1. Dots appear one by one from top to bottom
-      scrollDotsTimeline.to(scrollDotElements[0], {
-        opacity: 0.95,
-        scale: 1,
-        y: 0,
-        duration: 0.48,
-        ease: 'back.out(1.4)'
-      }, 0.0);
-
-      scrollDotsTimeline.to(scrollDotElements[1], {
-        opacity: 0.95,
-        scale: 1,
-        y: 0,
-        duration: 0.46,
-        ease: 'back.out(1.4)'
-      }, 0.28);
-
-      scrollDotsTimeline.to(scrollDotElements[2], {
-        opacity: 0.95,
-        scale: 1,
-        y: 0,
-        duration: 0.42,
-        ease: 'back.out(1.4)'
-      }, 0.54);
+      for (let i = 0; i < 3; i++) {
+        scrollDotsTimeline.to(scrollDotElements[i], {
+          opacity: 0.95,
+          scale: 1,
+          y: 0,
+          duration: DOT_APPEAR_DUR[i],
+          ease: 'back.out(1.4)'
+        }, DOT_APPEAR_AT[i]);
+      }
 
       // 2. Hold all 3 visible in vertical column (0.54s + 0.42s = 0.96s -> 1.76s = 0.8s hold)
       // 3. Trickle / drift downward and fade out in sequence
-      scrollDotsTimeline.to(scrollDotElements[0], {
-        opacity: 0,
-        scale: 0.4,
-        y: 6,
-        duration: 0.44,
-        ease: 'power2.in'
-      }, 1.76);
-
-      scrollDotsTimeline.to(scrollDotElements[1], {
-        opacity: 0,
-        scale: 0.4,
-        y: 6,
-        duration: 0.44,
-        ease: 'power2.in'
-      }, 1.96);
-
-      scrollDotsTimeline.to(scrollDotElements[2], {
-        opacity: 0,
-        scale: 0.4,
-        y: 6,
-        duration: 0.44,
-        ease: 'power2.in'
-      }, 2.16);
+      for (let i = 0; i < 3; i++) {
+        scrollDotsTimeline.to(scrollDotElements[i], {
+          opacity: 0,
+          scale: 0.4,
+          y: 6,
+          duration: DOT_FADE_DUR,
+          ease: 'power2.in'
+        }, DOT_FADE_AT[i]);
+      }
     }
 
     playNextCycle();
@@ -765,6 +705,7 @@
 
   function setCursorEnabled(enabled) {
     cursorEnabled = !!enabled;
+    scrollBelowFold = null;
     if (cursorRevealTween) {
       cursorRevealTween.kill();
       cursorRevealTween = null;
@@ -780,10 +721,11 @@
       }
       cursorReveal.value = 0;
       if (window.gsap && !motionPreference.matches) {
+        // Synchronized with celestial orbit rings (1.8s sine.out): liquid cursor emerges gently and majestically
         cursorRevealTween = window.gsap.to(cursorReveal, {
           value: 1,
-          duration: 0.32,
-          ease: 'power2.out',
+          duration: 1.8,
+          ease: 'sine.out',
           onUpdate: scheduleRender
         });
       } else {
@@ -796,40 +738,45 @@
       stopScrollDotsAnimation();
       stopDriftingClouds();
       cursorReveal.value = 0;
-      if (typeof pointer !== 'undefined') pointer.leave();
-      if (typeof FIN !== 'undefined' && FIN) FIN.fill(0);
-      if (typeof FR !== 'undefined' && FR) FR.fill(0);
-      if (typeof FT !== 'undefined' && FT) FT.fill(0);
-      if (typeof FE !== 'undefined' && FE) FE.fill(0);
-      if (typeof FDX !== 'undefined' && FDX) FDX.fill(0);
-      if (typeof FDY !== 'undefined' && FDY) FDY.fill(0);
-      if (typeof FST !== 'undefined' && FST) FST.fill(0);
-      if (typeof activeField !== 'undefined') activeField.length = 0;
-      if (typeof cursorWaves !== 'undefined') cursorWaves.length = 0;
+      pointer.leave();
+      // Поле точек выделяет buildCursorField(); resizeAll вызывает её раньше, проверка — страховка
+      if (FIN) {
+        FIN.fill(0);
+        FR.fill(0);
+        FT.fill(0);
+        FE.fill(0);
+        FDX.fill(0);
+        FDY.fill(0);
+        FST.fill(0);
+      }
+      activeField.length = 0;
+      cursorWaves.length = 0;
       scheduleRender();
     }
   }
 
-  
-  window.__setCursorEnabled = setCursorEnabled;
-
   // ==========================================================================
-  // ГЕРОИЧЕСКАЯ КОМПОЗИЦИЯ: ОБЛАКО, АРКИ И ОРБИТАЛЬНЫЕ ЛИНИИ
+  // ГЕРОИЧЕСКАЯ КОМПОЗИЦИЯ: ОРБИТАЛЬНЫЕ ЛИНИИ
   // ==========================================================================
   const heroComposition = document.getElementById('hero-composition');
-  const heroCloud = document.getElementById('hero-cloud') || document.getElementById('hero-bust');
   const heroOrbitsWrapper = document.getElementById('hero-orbits-wrapper');
   const heroOrbits = document.getElementById('hero-orbits');
   const heroAxisSvg = document.getElementById('hero-axis-svg');
   const heroEllipseRunner = document.getElementById('hero-ellipse-runner');
 
+  // Контейнер орбит (качается в 3D) и элементы, которые проявляются вместе с ним
+  const orbitsContainer = heroOrbitsWrapper || heroOrbits;
+  const orbitElements = [orbitsContainer, heroAxisSvg].filter(Boolean);
+
   const cosR = Math.cos(-11 * Math.PI / 180);
   const sinR = Math.sin(-11 * Math.PI / 180);
   const ellipseRunnerObj = { angle: 0 };
-  let orbitRunnerTween = null;
-  let orbitSwayXTween = null;
-  let orbitSwayYTween = null;
-  let orbitSwayZTween = null;
+  // Бесконечные твины орбит: бегунок по эллипсу и три покачивания (rotationX/Y/Z) контейнера
+  const ORBIT_RUNNER = 0;
+  const ORBIT_SWAY_X = 1;
+  const ORBIT_SWAY_Y = 2;
+  const ORBIT_SWAY_Z = 3;
+  const orbitTweens = [null, null, null, null];
 
   function updateEllipseRunnerPosition(t) {
     if (!heroEllipseRunner) return;
@@ -841,15 +788,34 @@
     heroEllipseRunner.setAttribute('cy', y.toFixed(2));
   }
 
+  function setOrbitsActive(on) {
+    if (heroComposition) heroComposition.classList.toggle('is-active-orbits', on);
+    if (heroOrbits) heroOrbits.classList.toggle('is-active-orbits', on);
+    if (heroAxisSvg) heroAxisSvg.classList.toggle('is-active-orbits', on);
+  }
+
+  // Пауза/возобновление бесконечных твинов орбит при уходе за первый экран
+  function pauseOrbitTweens() {
+    for (let i = 0; i < orbitTweens.length; i++) {
+      const tw = orbitTweens[i];
+      if (tw && tw.isActive()) tw.pause();
+    }
+  }
+
+  function resumeOrbitTweens() {
+    for (let i = 0; i < orbitTweens.length; i++) {
+      const tw = orbitTweens[i];
+      if (tw && tw.paused()) tw.play();
+    }
+  }
+
   function startOrbitMotion() {
     killIdleTweens();
     if (motionPreference.matches || !window.gsap) return;
-    if (heroComposition) heroComposition.classList.add('is-active-orbits');
-    if (heroOrbits) heroOrbits.classList.add('is-active-orbits');
-    if (heroAxisSvg) heroAxisSvg.classList.add('is-active-orbits');
-    
+    setOrbitsActive(true);
+
     if (heroEllipseRunner) {
-      orbitRunnerTween = window.gsap.to(ellipseRunnerObj, {
+      orbitTweens[ORBIT_RUNNER] = window.gsap.to(ellipseRunnerObj, {
         angle: Math.PI * 2,
         duration: 32,
         repeat: -1,
@@ -861,7 +827,6 @@
     }
 
     // Gentle 3D oscillation of orbital rings around the central horizontal axis
-    const orbitsContainer = heroOrbitsWrapper || heroOrbits;
     if (orbitsContainer) {
       window.gsap.set(orbitsContainer, {
         xPercent: -50,
@@ -872,7 +837,7 @@
       });
 
       // 1. Slow 3D tilt around the horizontal axis (X-axis): ±5.5 degrees, ~16s cycle
-      orbitSwayXTween = window.gsap.fromTo(orbitsContainer,
+      orbitTweens[ORBIT_SWAY_X] = window.gsap.fromTo(orbitsContainer,
         { rotationX: -5.5 },
         {
           rotationX: 5.5,
@@ -884,7 +849,7 @@
       );
 
       // 2. Subtle precession out of plane (Y-axis): ±2.5 degrees, ~21s cycle
-      orbitSwayYTween = window.gsap.fromTo(orbitsContainer,
+      orbitTweens[ORBIT_SWAY_Y] = window.gsap.fromTo(orbitsContainer,
         { rotationY: -2.5 },
         {
           rotationY: 2.5,
@@ -896,7 +861,7 @@
       );
 
       // 3. Gentle axial roll (Z-axis): ±1.2 degrees, ~26s cycle
-      orbitSwayZTween = window.gsap.fromTo(orbitsContainer,
+      orbitTweens[ORBIT_SWAY_Z] = window.gsap.fromTo(orbitsContainer,
         { rotationZ: -1.2 },
         {
           rotationZ: 1.2,
@@ -910,29 +875,17 @@
   }
 
   function killIdleTweens() {
-    if (orbitRunnerTween) {
-      orbitRunnerTween.kill();
-      orbitRunnerTween = null;
+    scrollBelowFold = null;
+    for (let i = 0; i < orbitTweens.length; i++) {
+      if (orbitTweens[i]) {
+        orbitTweens[i].kill();
+        orbitTweens[i] = null;
+      }
     }
-    if (orbitSwayXTween) {
-      orbitSwayXTween.kill();
-      orbitSwayXTween = null;
-    }
-    if (orbitSwayYTween) {
-      orbitSwayYTween.kill();
-      orbitSwayYTween = null;
-    }
-    if (orbitSwayZTween) {
-      orbitSwayZTween.kill();
-      orbitSwayZTween = null;
-    }
-    const orbitsContainer = heroOrbitsWrapper || heroOrbits;
     if (orbitsContainer && window.gsap) {
       window.gsap.set(orbitsContainer, { rotationX: 0, rotationY: 0, rotationZ: 0 });
     }
-    if (heroComposition) heroComposition.classList.remove('is-active-orbits');
-    if (heroOrbits) heroOrbits.classList.remove('is-active-orbits');
-    if (heroAxisSvg) heroAxisSvg.classList.remove('is-active-orbits');
+    setOrbitsActive(false);
   }
 
   function setupHeroArtwork() {
@@ -941,27 +894,18 @@
     ellipseRunnerObj.angle = 0;
     updateEllipseRunnerPosition(0);
 
-    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
     if (orbitElements.length) {
-      if (heroComposition) heroComposition.classList.remove('is-active-orbits');
-      if (heroOrbits) heroOrbits.classList.remove('is-active-orbits');
-      if (heroAxisSvg) heroAxisSvg.classList.remove('is-active-orbits');
+      setOrbitsActive(false);
       if (window.gsap) {
         window.gsap.set(orbitElements, { opacity: 0 });
       } else {
         orbitElements.forEach(el => { el.style.opacity = '0'; });
       }
     }
-
-  }
-
-  function resetHeroArtwork() {
-    setupHeroArtwork();
   }
 
   function showHeroArtworkInstant() {
     killIdleTweens();
-    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
     if (window.gsap) {
       window.gsap.set(orbitElements, { opacity: 1 });
     } else {
@@ -972,7 +916,6 @@
   }
 
   function createHeroArtworkTimeline() {
-    const orbitElements = [heroOrbitsWrapper || heroOrbits, heroAxisSvg].filter(Boolean);
     if (!orbitElements.length || !window.gsap) return null;
     const tl = window.gsap.timeline({
       onComplete() {
@@ -987,8 +930,6 @@
       ease: 'sine.out'
     }, 0);
 
-
-
     return tl;
   }
 
@@ -998,22 +939,26 @@
   const driftingCloudsLayer = document.getElementById('drifting-clouds-layer');
 
   const CLOUD_ASSETS = [
-    { src: 'assets/cloud_01.png', widthVw: 28, aspect: 3.00, baseDuration: 115 },
-    { src: 'assets/cloud_02.png', widthVw: 27, aspect: 3.00, baseDuration: 145 },
-    { src: 'assets/cloud_03.png', widthVw: 24, aspect: 2.00, baseDuration: 100 },
-    { src: 'assets/cloud_04.png', widthVw: 22, aspect: 1.78, baseDuration: 80 },
-    { src: 'assets/cloud_05.png', widthVw: 25, aspect: 2.00, baseDuration: 130 },
-    { src: 'assets/cloud_06.png', widthVw: 20, aspect: 1.50, baseDuration: 72 },
-    { src: 'assets/cloud_07.png', widthVw: 23, aspect: 2.00, baseDuration: 105 },
-    { src: 'assets/cloud_08.png', widthVw: 25, aspect: 2.00, baseDuration: 155 },
-    { src: 'assets/cloud_09.png', widthVw: 24, aspect: 2.00, baseDuration: 110 },
-    { src: 'assets/cloud_10.png', widthVw: 26, aspect: 2.00, baseDuration: 138 },
+    { src: 'assets/cloud_01.png', heightMap: 'assets/cloud_01_heightmap.png', normalMap: 'assets/cloud_01_normal.png', widthVw: 28, aspect: 3.00, baseDuration: 115 },
+    { src: 'assets/cloud_02.png', heightMap: 'assets/cloud_02_heightmap.png', normalMap: 'assets/cloud_02_normal.png', widthVw: 27, aspect: 3.00, baseDuration: 145 },
+    { src: 'assets/cloud_03.png', heightMap: 'assets/cloud_03_heightmap.png', normalMap: 'assets/cloud_03_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 100 },
+    { src: 'assets/cloud_04.png', heightMap: 'assets/cloud_04_heightmap.png', normalMap: 'assets/cloud_04_normal.png', widthVw: 22, aspect: 1.78, baseDuration: 80 },
+    { src: 'assets/cloud_05.png', heightMap: 'assets/cloud_05_heightmap.png', normalMap: 'assets/cloud_05_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 130 },
+    { src: 'assets/cloud_06.png', heightMap: 'assets/cloud_06_heightmap.png', normalMap: 'assets/cloud_06_normal.png', widthVw: 20, aspect: 1.50, baseDuration: 72 },
+    { src: 'assets/cloud_07.png', heightMap: 'assets/cloud_07_heightmap.png', normalMap: 'assets/cloud_07_normal.png', widthVw: 23, aspect: 2.00, baseDuration: 105 },
+    { src: 'assets/cloud_08.png', heightMap: 'assets/cloud_08_heightmap.png', normalMap: 'assets/cloud_08_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 155 },
+    { src: 'assets/cloud_09.png', heightMap: 'assets/cloud_09_heightmap.png', normalMap: 'assets/cloud_09_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 110 },
+    { src: 'assets/cloud_10.png', heightMap: 'assets/cloud_10_heightmap.png', normalMap: 'assets/cloud_10_normal.png', widthVw: 26, aspect: 2.00, baseDuration: 138 },
   ];
 
-  // Preload cloud images into browser cache
+  // Preload cloud images, heightmaps and normal maps into browser cache
   CLOUD_ASSETS.forEach(item => {
     const img = new Image();
     img.src = item.src;
+    const imgH = new Image();
+    imgH.src = item.heightMap;
+    const imgN = new Image();
+    imgN.src = item.normalMap;
   });
 
   const MAX_ACTIVE_CLOUDS = 2;
@@ -1030,68 +975,6 @@
     { name: 'sky-lower', topPercent: 21, jitter: 2 }   // 19% - 23%
   ];
 
-  function attachCloud3DTilt(wrapper) {
-    if (!wrapper || motionPreference.matches || !window.gsap) return null;
-
-    const maxTilt = 18;
-    const rotXTo = window.gsap.quickTo(wrapper, 'rotationX', { duration: 0.35, ease: 'power2.out' });
-    const rotYTo = window.gsap.quickTo(wrapper, 'rotationY', { duration: 0.35, ease: 'power2.out' });
-    const zTo = window.gsap.quickTo(wrapper, 'z', { duration: 0.35, ease: 'power2.out' });
-    let leaveTween = null;
-
-    function onPointerEnter() {
-      if (leaveTween) {
-        leaveTween.kill();
-        leaveTween = null;
-      }
-    }
-
-    function onPointerMove(e) {
-      if (leaveTween) {
-        leaveTween.kill();
-        leaveTween = null;
-      }
-      const rect = wrapper.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const px = Math.max(-0.5, Math.min(0.5, (e.clientX - rect.left) / rect.width - 0.5));
-      const py = Math.max(-0.5, Math.min(0.5, (e.clientY - rect.top) / rect.height - 0.5));
-
-      // 3D Tilt: mouse at edge sinks that edge into the depth, opposite edge pokes out
-      rotXTo(-py * 2 * maxTilt);
-      rotYTo(px * 2 * maxTilt);
-      zTo(-10);
-    }
-
-    function onPointerLeave() {
-      if (leaveTween) {
-        leaveTween.kill();
-      }
-      leaveTween = window.gsap.to(wrapper, {
-        rotationX: 0,
-        rotationY: 0,
-        z: 0,
-        duration: 0.85,
-        ease: 'power3.out'
-      });
-    }
-
-    wrapper.addEventListener('pointerenter', onPointerEnter, { passive: true });
-    wrapper.addEventListener('pointermove', onPointerMove, { passive: true });
-    wrapper.addEventListener('pointerleave', onPointerLeave, { passive: true });
-
-    return function cleanup() {
-      if (leaveTween) {
-        leaveTween.kill();
-        leaveTween = null;
-      }
-      wrapper.removeEventListener('pointerenter', onPointerEnter);
-      wrapper.removeEventListener('pointermove', onPointerMove);
-      wrapper.removeEventListener('pointerleave', onPointerLeave);
-    };
-  }
-
-
-
   function spawnDriftingCloud(initialProgress = 0) {
     if (!driftingCloudsRunning || !driftingCloudsLayer || motionPreference.matches || !window.gsap) return;
     if (activeDriftingClouds.length >= MAX_ACTIVE_CLOUDS) return;
@@ -1107,12 +990,12 @@
     // Pick altitude lane different from active clouds (upper sky only)
     const usedLanes = activeDriftingClouds.map(c => c.laneIdx);
     const availableLanes = [0, 1, 2].filter(idx => !usedLanes.includes(idx));
-    const laneIdx = availableLanes.length ? availableLanes[Math.floor(Math.random() * availableLanes.length)] : (lastLaneIndex + 1) % 3;
+    const laneIdx = availableLanes.length ? availableLanes[Math.floor(Math.random() * availableLanes.length)] : (lastLaneIndex + 1) % ALTITUDE_LANES.length;
     lastLaneIndex = laneIdx;
     const lane = ALTITUDE_LANES[laneIdx];
     const topPct = lane.topPercent + (Math.random() * 2 - 1) * lane.jitter;
 
-    // Create cloud elements with 100% solid opacity
+    // Create cloud container
     const item = document.createElement('div');
     item.className = 'drifting-cloud-item';
     item.style.top = `${topPct}%`;
@@ -1120,28 +1003,47 @@
     item.style.aspectRatio = String(asset.aspect);
     item.style.opacity = '1';
 
-    const tiltWrapper = document.createElement('div');
-    tiltWrapper.className = 'cloud-tilt-wrapper';
-    tiltWrapper.style.aspectRatio = String(asset.aspect);
-    tiltWrapper.style.opacity = '1';
+    const reliefWrapper = document.createElement('div');
+    reliefWrapper.className = 'cloud-tilt-wrapper';
+    reliefWrapper.style.aspectRatio = String(asset.aspect);
+    reliefWrapper.style.width = '100%';
+    reliefWrapper.style.height = '100%';
+    reliefWrapper.style.opacity = initialProgress > 0 ? '0' : '1';
 
-    const img = document.createElement('img');
-    img.src = asset.src;
-    img.alt = '';
-    img.draggable = false;
-    img.style.aspectRatio = String(asset.aspect);
-    img.style.opacity = '1';
+    item.appendChild(reliefWrapper);
 
-    tiltWrapper.appendChild(img);
-    item.appendChild(tiltWrapper);
     driftingCloudsLayer.appendChild(item);
-
-    const cleanupTilt = attachCloud3DTilt(tiltWrapper);
 
     const rect = item.getBoundingClientRect();
     const cloudWidth = rect.width || (window.innerWidth * (asset.widthVw / 100));
+    const cloudHeight = cloudWidth / asset.aspect;
     const startX = -cloudWidth - 60;
     const endX = window.innerWidth + 60;
+
+    // Instantiate 2.5D Volumetric Relief Cloud
+    let cloudRelief = null;
+    if (typeof CloudRelief !== 'undefined') {
+      cloudRelief = new CloudRelief(reliefWrapper, {
+        diffuseMap: asset.src,
+        heightMap: asset.heightMap,
+        normalMap: asset.normalMap,
+        aspectRatio: asset.aspect,
+        width: cloudWidth,
+        height: cloudHeight,
+        enableDebugHUD: false,
+        config: {
+          depthStrength: 0.065,
+          hoverIndentStrength: 0.045,
+          oppositeBulgeStrength: 0.065,
+          hoverRadius: 0.38,
+          maxTilt: 0.20,
+          springStiffness: 85,
+          springDamping: 18,
+          lightingStrength: 0.38,
+          enabled: true
+        }
+      });
+    }
 
     // Duration: 70 to 160 seconds with perceptible differences between airy and heavy clouds
     const durationVariance = (Math.random() * 2 - 1) * 12;
@@ -1152,10 +1054,11 @@
     const cloudRecord = {
       element: item,
       laneIdx,
-      cleanupTilt,
+      cloudRelief,
       timeline: null
     };
     activeDriftingClouds.push(cloudRecord);
+    scrollBelowFold = null; // новое облако должно получить паузу/ход по текущему скроллу
 
     const tl = window.gsap.timeline({
       onComplete() {
@@ -1166,12 +1069,21 @@
       }
     });
 
-    // Horizontal drift - completely opaque (opacity: 1), zero transparency, graceful slow motion
+    // Horizontal drift across the sky
     tl.fromTo(item, 
       { x: currentStartX },
       { x: endX, duration: duration, ease: 'none' },
       0
     );
+
+    // If spawned mid-sky (after text intro), gently materialize simultaneously with rings & cursor (1.8s sine.out)
+    if (initialProgress > 0 && window.gsap) {
+      tl.fromTo(reliefWrapper,
+        { opacity: 0, scale: 0.95 },
+        { opacity: 1, scale: 1, duration: 1.8, ease: 'sine.out' },
+        0
+      );
+    }
 
     cloudRecord.timeline = tl;
 
@@ -1195,7 +1107,10 @@
   function removeDriftingCloud(record) {
     const idx = activeDriftingClouds.indexOf(record);
     if (idx !== -1) activeDriftingClouds.splice(idx, 1);
-    if (record.cleanupTilt) record.cleanupTilt();
+    if (record.cloudRelief) {
+      record.cloudRelief.destroy();
+      record.cloudRelief = null;
+    }
     if (record.timeline) record.timeline.kill();
     if (record.element && record.element.parentNode) {
       record.element.parentNode.removeChild(record.element);
@@ -1230,16 +1145,18 @@
   }
 
   function pauseDriftingClouds() {
-    activeDriftingClouds.forEach(c => {
+    for (let i = 0; i < activeDriftingClouds.length; i++) {
+      const c = activeDriftingClouds[i];
       if (c.timeline) c.timeline.pause();
-    });
+    }
   }
 
   function resumeDriftingClouds() {
     if (!driftingCloudsRunning) return;
-    activeDriftingClouds.forEach(c => {
+    for (let i = 0; i < activeDriftingClouds.length; i++) {
+      const c = activeDriftingClouds[i];
       if (c.timeline && c.timeline.paused()) c.timeline.play();
-    });
+    }
   }
 
   function stopDriftingClouds() {
@@ -1247,15 +1164,7 @@
     clearAllDriftingClouds();
   }
 
-  window.__spawnDriftingCloud = spawnDriftingCloud;
-  window.__activeDriftingClouds = activeDriftingClouds;
-  window.__startDriftingClouds = startDriftingClouds;
-  window.__stopDriftingClouds = stopDriftingClouds;
-  window.__startOrbitMotion = startOrbitMotion;
-  window.__showHeroArtworkInstant = showHeroArtworkInstant;
-
   function playGsapChoreography(progress = 0) {
-    dropsStaticUploaded = false;
     if (mainTimeline) {
       mainTimeline.kill();
     }
@@ -1273,7 +1182,7 @@
       return;
     }
 
-    resetHeroArtwork();
+    setupHeroArtwork();
 
     // Очерёдность появления и вылета капель:
     // 1) Финальные 8 капель хвоста выбираются из близких/умеренных дистанций к буквам,
@@ -1282,8 +1191,7 @@
     const decDrops = 8;
     const dropsWithDist = drops.map((d, i) => ({
       i,
-      dist: Math.hypot(d.sx - d.ax, d.sy - d.ay),
-      radial: d.radial
+      dist: Math.hypot(d.sx - d.ax, d.sy - d.ay)
     })).sort((a, b) => a.dist - b.dist);
 
     const closeCandidates = dropsWithDist.slice(0, Math.min(28, drops.length));
@@ -1513,15 +1421,12 @@
 
   const CURSOR_CFG = {
     fieldRadius: 42,
-    density: 2,
     minDist: 18.8,
     maxRadius: 12,
     stretch: 1.0,
-    goo: true,
     clickMode: 'shockwave',
     clickRadius: 55,
-    clickPower: 0.4,
-    hideCursor: true
+    clickPower: 0.4
   };
   const BIN = 64;
   const PAD = 32;
@@ -1533,6 +1438,7 @@
   let binCols = 0;
   let binRows = 0;
   const cursorWaves = [];
+  let cloudCursorDim = 0.0;
 
   function triggerCursorClick(cx, cy) {
     if (!cursorEnabled || CURSOR_CFG.clickMode !== 'shockwave') return;
@@ -1568,7 +1474,7 @@
 
   function buildCursorField() {
     const H = Math.max(1, Math.min(width * 0.12, (width - 40) / 7.02, height * 0.28, 134));
-    const dotScale = Math.max(0.50, Math.min(1.0, 0.45 + 0.55 * Math.pow((H - 35) / (134 - 35), 0.85)));
+    const dotScale = Math.max(0.50, Math.min(1.0, 0.45 + 0.55 * Math.pow(Math.max(0, (H - 35) / (134 - 35)), 0.85)));
     CURSOR_CFG.maxRadius = Math.max(6, Math.round(12 * dotScale));
     CURSOR_CFG.fieldRadius = Math.max(28, Math.round(42 * Math.max(0.70, dotScale)));
     CURSOR_CFG.clickRadius = Math.max(38, Math.round(55 * Math.max(0.70, dotScale)));
@@ -1676,7 +1582,36 @@
     buildCursorField();
     cursorWaves.length = 0;
     playGsapChoreography(progress);
+    uploadStaticUniforms();
     scheduleRender();
+  }
+
+  // u_res, u_dpr и u_strokeR меняются только при ресайзе / пересборке слова (buildWordAndDrops внутри
+  // playGsapChoreography), поэтому грузим их один раз в конце resizeAll, а не каждый кадр.
+  // Программа одна и активна с момента линковки (gl.useProgram(prog)), uniform-ы живут в ней между кадрами.
+  function uploadStaticUniforms() {
+    gl.uniform2f(uRes, width, height);
+    gl.uniform1f(uDpr, dpr);
+    gl.uniform1f(uStrokeR, strokeR);
+  }
+
+  // Последний загруженный u_textBBox (NaN — ещё не грузили): перезаливаем только при изменении значений
+  let bboxMinX = NaN;
+  let bboxMinY = NaN;
+  let bboxMaxX = NaN;
+  let bboxMaxY = NaN;
+
+  // Компаратор сортировки активных точек курсора по убыванию радиуса (создаётся один раз, не в кадре)
+  const byRadiusDesc = (a, b) => FR[b] - FR[a];
+
+  // Полный сброс точки поля курсора
+  function resetDot(i) {
+    FR[i] = 0;
+    FDX[i] = 0;
+    FDY[i] = 0;
+    FST[i] = 0;
+    FIN[i] = 0;
+    FE[i] = 0;
   }
 
   let lastTime = performance.now();
@@ -1709,21 +1644,12 @@
         // Смещение вдоль самого штриха по мере динамичного растекания по инерции
         let glideX = 0;
         let glideY = 0;
-        let dirX = d.flowUx;
-        let dirY = d.flowUy;
+        const dirX = d.flowUx;
+        const dirY = d.flowUy;
 
         if (abs > 0.0001) {
-          if (d.type === 0) {
-            glideX = (d.bx - d.ax) * abs;
-            glideY = (d.by - d.ay) * abs;
-          } else {
-            const ang = d.a0 + (d.aEnd - d.a0) * abs;
-            glideX = (d.arcCx + Math.cos(ang) * yahArcR) - d.ax;
-            glideY = (d.arcCy + Math.sin(ang) * yahArcR) - d.ay;
-            const dirSign = d.aEnd >= d.a0 ? 1 : -1;
-            dirX = -Math.sin(ang) * dirSign;
-            dirY = Math.cos(ang) * dirSign;
-          }
+          glideX = (d.bx - d.ax) * abs;
+          glideY = (d.by - d.ay) * abs;
         }
 
         // Капля на поверхности полотна: координаты строго зафиксированы на месте (без парения и дрейфа)
@@ -1782,42 +1708,72 @@
 
         // Ось заканчивается в центре головы, строго на оси буквы.
         // Овальный носик строится в шейдере без выступающего продолжения линии.
-        if (d.type === 0) {
-          dropSegData[i * 4] = d.ax;
-          dropSegData[i * 4 + 1] = d.ay;
-          dropSegData[i * 4 + 2] = d.ax + glideX;
-          dropSegData[i * 4 + 3] = d.ay + glideY;
-        } else {
-          const a1 = d.a0 + (d.aEnd - d.a0) * abs;
-          dropSegData[i * 4] = d.arcCx;
-          dropSegData[i * 4 + 1] = d.arcCy;
-          dropSegData[i * 4 + 2] = 0.5 * (d.a0 + a1);
-          dropSegData[i * 4 + 3] = 0.5 * Math.abs(a1 - d.a0);
-        }
+        dropSegData[i * 4] = d.ax;
+        dropSegData[i * 4 + 1] = d.ay;
+        dropSegData[i * 4 + 2] = d.ax + glideX;
+        dropSegData[i * 4 + 3] = d.ay + glideY;
 
         dropParamsData[i * 4] = rCore;
         dropParamsData[i * 4 + 1] = abs;
         dropParamsData[i * 4 + 2] = 0.0;
-        dropParamsData[i * 4 + 3] = d.type;
+        dropParamsData[i * 4 + 3] = 0.0;
       }
 
+      // WebGL2: uniform4fv(loc, data, srcOffset, srcLength) — без subarray (нет аллокации).
+      // srcLength = 0 в WebGL2 значит «до конца массива», поэтому при numDrops == 0 не вызываем.
       gl.uniform1i(uDropCount, numDrops);
-      gl.uniform4fv(uDropCore, dropCoreData.subarray(0, numDrops * 4));
-      gl.uniform4fv(uDropSeg, dropSegData.subarray(0, numDrops * 4));
-      gl.uniform4fv(uDropParams, dropParamsData.subarray(0, numDrops * 4));
+      if (numDrops > 0) {
+        gl.uniform4fv(uDropCore, dropCoreData, 0, numDrops * 4);
+        gl.uniform4fv(uDropSeg, dropSegData, 0, numDrops * 4);
+        gl.uniform4fv(uDropParams, dropParamsData, 0, numDrops * 4);
+      }
 
       if (!isIntroActive) {
         dropsStaticUploaded = true;
       }
     }
 
-    if (isIntroActive) {
-      gl.uniform4f(uTextBBox, 0, 0, width, height);
-    } else {
-      gl.uniform4f(uTextBBox, textBBox.minX, textBBox.minY, textBBox.maxX, textBBox.maxY);
+    // u_textBBox: на интро — весь экран, потом — рамка слова; грузим только при смене значений
+    const bbMinX = isIntroActive ? 0 : textBBox.minX;
+    const bbMinY = isIntroActive ? 0 : textBBox.minY;
+    const bbMaxX = isIntroActive ? width : textBBox.maxX;
+    const bbMaxY = isIntroActive ? height : textBBox.maxY;
+    if (bbMinX !== bboxMinX || bbMinY !== bboxMinY || bbMaxX !== bboxMaxX || bbMaxY !== bboxMaxY) {
+      bboxMinX = bbMinX;
+      bboxMinY = bbMinY;
+      bboxMaxX = bbMaxX;
+      bboxMaxY = bbMaxY;
+      gl.uniform4f(uTextBBox, bbMinX, bbMinY, bbMaxX, bbMaxY);
     }
 
-    // 2. Скрытые точки под курсором
+    // Sync global pointer with CloudRelief instances
+    if (window.__cloudReliefGlobalPointer) {
+      window.__cloudReliefGlobalPointer.x = pointer.x;
+      window.__cloudReliefGlobalPointer.y = pointer.y;
+      window.__cloudReliefGlobalPointer.inside = pointer.inside;
+    }
+
+    // Wake up active drifting cloud reliefs so they continuously hit-test while moving
+    let isOverCloud = false;
+    if (cursorEnabled && pointer.inside && driftingCloudsRunning) {
+      for (let c = 0; c < activeDriftingClouds.length; c++) {
+        const cr = activeDriftingClouds[c];
+        if (cr && cr.cloudRelief) {
+          cr.cloudRelief._requestFrame();
+          if (cr.cloudRelief.isInsideSilhouette || cr.cloudRelief.hoverActive > 0.02) {
+            isOverCloud = true;
+          }
+        }
+      }
+    }
+
+    const targetCloudDim = isOverCloud ? 1.0 : 0.0;
+    const dimEase = targetCloudDim > 0.5 ? 0.055 : 0.075;
+    cloudCursorDim += (targetCloudDim - cloudCursorDim) * (1 - Math.pow(1 - dimEase, s));
+    if (Math.abs(cloudCursorDim - targetCloudDim) < 0.002) {
+      cloudCursorDim = targetCloudDim;
+    }
+
     const fr = CURSOR_CFG.fieldRadius;
     const fr2 = fr * fr;
     const speed = pointer.speed;
@@ -1903,7 +1859,8 @@
         // капля слегка приподнимается над полотном при рождении (+20%), затем мягко оседает
         const e = Math.min(1.0, FE[i]);
         const bloom = Math.sin(e * Math.PI) * 0.20;
-        const emergeFactor = (e + bloom) * revealVal;
+        const cloudFade = Math.max(0.0, 1.0 - cloudCursorDim);
+        const emergeFactor = (e + bloom) * revealVal * cloudFade;
 
         FT[i] = (minR + (maxR - minR) * Math.pow(proximity, 1.25)) * FSF[i] * emergeFactor;
         if (stretching) {
@@ -1968,12 +1925,7 @@
       FST[i] += (targetStretch - FST[i]) * pEase;
 
       if (FR[i] <= 0.02 && FT[i] === 0) {
-        FR[i] = 0;
-        FDX[i] = 0;
-        FDY[i] = 0;
-        FST[i] = 0;
-        FIN[i] = 0;
-        FE[i] = 0;
+        resetDot(i);
         continue;
       }
 
@@ -1987,15 +1939,9 @@
     if (cursorEnabled && activeField.length > 0) {
       if (activeField.length > MAX_CURSOR_DOTS) {
         // Приоритет самым заметным каплям: крупные капли никогда не отсекаются внезапно
-        activeField.sort((a, b) => FR[b] - FR[a]);
+        activeField.sort(byRadiusDesc);
         for (let n = MAX_CURSOR_DOTS; n < activeField.length; n++) {
-          const i = activeField[n];
-          FR[i] = 0;
-          FDX[i] = 0;
-          FDY[i] = 0;
-          FST[i] = 0;
-          FIN[i] = 0;
-          FE[i] = 0;
+          resetDot(activeField[n]);
         }
         activeField.length = MAX_CURSOR_DOTS;
       }
@@ -2020,22 +1966,20 @@
       }
     }
 
-    gl.uniform2f(uRes, width, height);
-    gl.uniform1f(uDpr, dpr);
-    gl.uniform1f(uStrokeR, strokeR);
-    gl.uniform1f(uYahArcR, yahArcR);
     gl.uniform1f(uScrollY, window.scrollY || window.pageYOffset || 0);
 
     gl.uniform1i(uCursorCount, cursorSendCount);
     if (cursorSendCount > 0) {
-      gl.uniform4fv(uCursorDots, cursorDotsData.subarray(0, cursorSendCount * 4));
+      gl.uniform4fv(uCursorDots, cursorDotsData, 0, cursorSendCount * 4);
     }
     gl.uniform2f(uCursorDir, Math.cos(pointer.angle), Math.sin(pointer.angle));
     gl.uniform4f(uCursorBBox, cMinX, cMinY, cMaxX, cMaxY);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length)) || (cursorRevealTween && cursorRevealTween.isActive())) scheduleRender();
+    if ((mainTimeline && mainTimeline.isActive()) || (cursorEnabled && (pointer.inside || activeField.length || cursorWaves.length || (cloudCursorDim > 0.005 && cloudCursorDim < 0.995))) || (cursorRevealTween && cursorRevealTween.isActive())) {
+      scheduleRender();
+    }
   }
 
   window.addEventListener('scroll', () => {
@@ -2043,20 +1987,20 @@
     if (scrollY > 30 && !cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) {
       setCursorEnabled(true);
     }
+    // Паузу/возобновление применяем только при переходе через сгиб первого экрана (scrollBelowFold === null —
+    // состояние неизвестно, применяем при первом же событии)
     if (scrollY > window.innerHeight) {
-      if (scrollDotsActive) stopScrollDotsAnimation();
-      pauseDriftingClouds();
-      if (orbitSwayXTween && orbitSwayXTween.isActive()) orbitSwayXTween.pause();
-      if (orbitSwayYTween && orbitSwayYTween.isActive()) orbitSwayYTween.pause();
-      if (orbitSwayZTween && orbitSwayZTween.isActive()) orbitSwayZTween.pause();
-      if (orbitRunnerTween && orbitRunnerTween.isActive()) orbitRunnerTween.pause();
-    } else if (cursorEnabled) {
+      if (scrollBelowFold !== true) {
+        scrollBelowFold = true;
+        if (scrollDotsActive) stopScrollDotsAnimation();
+        pauseDriftingClouds();
+        pauseOrbitTweens();
+      }
+    } else if (cursorEnabled && scrollBelowFold !== false) {
+      scrollBelowFold = false;
       if (!scrollDotsActive) startScrollDotsAnimation();
       resumeDriftingClouds();
-      if (orbitSwayXTween && orbitSwayXTween.paused()) orbitSwayXTween.play();
-      if (orbitSwayYTween && orbitSwayYTween.paused()) orbitSwayYTween.play();
-      if (orbitSwayZTween && orbitSwayZTween.paused()) orbitSwayZTween.play();
-      if (orbitRunnerTween && orbitRunnerTween.paused()) orbitRunnerTween.play();
+      resumeOrbitTweens();
     }
     scheduleRender();
   }, { passive: true });
@@ -2099,14 +2043,12 @@
   });
 
   let resizeTimer;
-  window.addEventListener('resize', () => {
+  function scheduleResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(resizeAll, 120);
-  });
-  window.visualViewport?.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resizeAll, 120);
-  });
+  }
+  window.addEventListener('resize', scheduleResize);
+  window.visualViewport?.addEventListener('resize', scheduleResize);
   window.addEventListener('pointerup', (event) => {
     if (event.pointerType !== 'mouse') pointer.leave();
   });
