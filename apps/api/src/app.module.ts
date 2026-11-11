@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
 import { envSchema } from './config/env.schema.js';
+import { CoreModule } from './core/core.module.js';
 
+// Доменные модули (questions, opinions, …) подключаются здесь, рядом с CoreModule.
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validationSchema: envSchema }),
@@ -18,8 +18,8 @@ import { envSchema } from './config/env.schema.js';
         },
       ],
     }),
+    CoreModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

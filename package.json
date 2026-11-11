@@ -6,13 +6,23 @@
     "node": ">=26.13.0"
   },
   "workspaces": [
+    "packages/*",
     "apps/*"
   ],
   "scripts": {
+    "postinstall": "yarn workspace @opinions/contracts build",
+    "dev": "yarn workspaces foreach -piA --exclude opinions run dev",
     "dev:web": "yarn workspace web dev",
-    "dev:api": "yarn workspace api start:dev",
-    "build": "yarn workspace api build && yarn workspace web build",
+    "dev:api": "yarn workspace api dev",
+    "build": "yarn workspaces foreach -tA --exclude opinions run build",
+    "typecheck": "yarn workspaces foreach -A --exclude opinions run typecheck",
     "lint": "yarn workspaces foreach -A --exclude opinions run lint",
-    "test": "yarn workspaces foreach -A --exclude opinions run test"
+    "test": "yarn workspaces foreach -A --exclude opinions run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10",
+    "prettier-plugin-tailwindcss": "^0.8.1"
   }
 }

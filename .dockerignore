@@ -1,0 +1,23 @@
+# Контекст сборки Docker — корень репозитория. Исключаем всё, что пересобирается в образе или не нужно ему.
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.github
+.claude
+.codex
+.idea
+.vscode
+# Любые .env (секреты) в образ не попадают
+**/.env
+**/.env.*
+# Прод-конфигурация и документация образам не нужны
+deploy
+docs
+**/*.md
+Идеи.md
+docker-compose.yml
+**/Dockerfile
+.dockerignore

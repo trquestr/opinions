@@ -6,21 +6,107 @@ on:
   pull_request:
     branches: [main]
 
+# Новый прогон на той же ветке отменяет предыдущий.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  ci:
+  checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       # Node 26 не несёт актуальный corepack - ставим свежий и включаем (Yarn 4 из packageManager).
       - run: npm i -g corepack@latest
       - run: corepack enable
       - run: yarn install --immutable
+      - run: yarn format:check
+      - run: yarn typecheck
       - run: yarn lint
       - run: yarn test
       - run: yarn build
       - name: Audit
         run: yarn npm audit --all --recursive --severity high
         continue-on-error: true
+
+  # Интеграционные тесты api на настоящих Postgres и Redis.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: opinions
+          POSTGRES_USER: opinions
+          POSTGRES_PASSWORD: opinions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opinions -d opinions"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://opinions:opinions@localhost:5432/opinions
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: npm i -g corepack@latest
+      - run: corepack enable
+      # postinstall собирает @opinions/contracts - отдельная сборка api тестам не нужна (vitest читает src).
+      - run: yarn install --immutable
+      - run: yarn workspace api test:int
+
+  # Проверка, что образы собираются (без публикации). Реестр/деплой - отдельным решением.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build api
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+      - name: Build web
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: true
+          tags: opinions/web:ci
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=https://example.com
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+      # Главная страница статична и в API при рендере не ходит - web поднимается без бэка.
+      - name: Smoke web
+        run: |
+          docker run -d --name web-smoke -p 3000:3000 opinions/web:ci
+          curl --retry 10 --retry-connrefused --retry-delay 2 -f -s -o /dev/null localhost:3000/ \
+            || { docker logs web-smoke; exit 1; }
+      - name: Stop web
+        if: always()
+        run: docker rm -f web-smoke

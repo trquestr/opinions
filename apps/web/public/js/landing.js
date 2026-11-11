@@ -939,16 +939,16 @@
   const driftingCloudsLayer = document.getElementById('drifting-clouds-layer');
 
   const CLOUD_ASSETS = [
-    { src: 'assets/cloud_01.png', heightMap: 'assets/cloud_01_heightmap.png', normalMap: 'assets/cloud_01_normal.png', widthVw: 28, aspect: 3.00, baseDuration: 115 },
-    { src: 'assets/cloud_02.png', heightMap: 'assets/cloud_02_heightmap.png', normalMap: 'assets/cloud_02_normal.png', widthVw: 27, aspect: 3.00, baseDuration: 145 },
-    { src: 'assets/cloud_03.png', heightMap: 'assets/cloud_03_heightmap.png', normalMap: 'assets/cloud_03_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 100 },
-    { src: 'assets/cloud_04.png', heightMap: 'assets/cloud_04_heightmap.png', normalMap: 'assets/cloud_04_normal.png', widthVw: 22, aspect: 1.78, baseDuration: 80 },
-    { src: 'assets/cloud_05.png', heightMap: 'assets/cloud_05_heightmap.png', normalMap: 'assets/cloud_05_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 130 },
-    { src: 'assets/cloud_06.png', heightMap: 'assets/cloud_06_heightmap.png', normalMap: 'assets/cloud_06_normal.png', widthVw: 20, aspect: 1.50, baseDuration: 72 },
-    { src: 'assets/cloud_07.png', heightMap: 'assets/cloud_07_heightmap.png', normalMap: 'assets/cloud_07_normal.png', widthVw: 23, aspect: 2.00, baseDuration: 105 },
-    { src: 'assets/cloud_08.png', heightMap: 'assets/cloud_08_heightmap.png', normalMap: 'assets/cloud_08_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 155 },
-    { src: 'assets/cloud_09.png', heightMap: 'assets/cloud_09_heightmap.png', normalMap: 'assets/cloud_09_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 110 },
-    { src: 'assets/cloud_10.png', heightMap: 'assets/cloud_10_heightmap.png', normalMap: 'assets/cloud_10_normal.png', widthVw: 26, aspect: 2.00, baseDuration: 138 },
+    { src: '/assets/cloud_01.png', heightMap: '/assets/cloud_01_heightmap.png', normalMap: '/assets/cloud_01_normal.png', widthVw: 28, aspect: 3.00, baseDuration: 115 },
+    { src: '/assets/cloud_02.png', heightMap: '/assets/cloud_02_heightmap.png', normalMap: '/assets/cloud_02_normal.png', widthVw: 27, aspect: 3.00, baseDuration: 145 },
+    { src: '/assets/cloud_03.png', heightMap: '/assets/cloud_03_heightmap.png', normalMap: '/assets/cloud_03_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 100 },
+    { src: '/assets/cloud_04.png', heightMap: '/assets/cloud_04_heightmap.png', normalMap: '/assets/cloud_04_normal.png', widthVw: 22, aspect: 1.78, baseDuration: 80 },
+    { src: '/assets/cloud_05.png', heightMap: '/assets/cloud_05_heightmap.png', normalMap: '/assets/cloud_05_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 130 },
+    { src: '/assets/cloud_06.png', heightMap: '/assets/cloud_06_heightmap.png', normalMap: '/assets/cloud_06_normal.png', widthVw: 20, aspect: 1.50, baseDuration: 72 },
+    { src: '/assets/cloud_07.png', heightMap: '/assets/cloud_07_heightmap.png', normalMap: '/assets/cloud_07_normal.png', widthVw: 23, aspect: 2.00, baseDuration: 105 },
+    { src: '/assets/cloud_08.png', heightMap: '/assets/cloud_08_heightmap.png', normalMap: '/assets/cloud_08_normal.png', widthVw: 25, aspect: 2.00, baseDuration: 155 },
+    { src: '/assets/cloud_09.png', heightMap: '/assets/cloud_09_heightmap.png', normalMap: '/assets/cloud_09_normal.png', widthVw: 24, aspect: 2.00, baseDuration: 110 },
+    { src: '/assets/cloud_10.png', heightMap: '/assets/cloud_10_heightmap.png', normalMap: '/assets/cloud_10_normal.png', widthVw: 26, aspect: 2.00, baseDuration: 138 },
   ];
 
   // Preload cloud images, heightmaps and normal maps into browser cache

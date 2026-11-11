@@ -1,44 +1,53 @@
 # «Мнения»
 
-Продукт «Мнения»: площадка, где мнение — это **один короткий простой ответ** на вопрос (см. `Идеи.md`).
-Сейчас есть промо-лендинг с WebGL-героем и каркас фронта/бэка. Владелец общается по-русски — отвечай по-русски.
+Продукт «Мнения»: личная библиотека мнений — каждый день вопрос, короткий ответ, история изменений взглядов
+(концепция — `Идеи.md`, архитектура и карта доменов — `docs/architecture.md`). Сейчас готовы промо-лендинг
+с WebGL-героем и инфраструктура под домены; доменных функций ещё нет. Владелец общается по-русски — отвечай по-русски.
 
 ## Стек и запуск
 
-Монорепо на **Yarn 4** workspaces (`apps/*`, `nodeLinker: node-modules`), **Node 26 LTS** (`.nvmrc`, `nvm use 26.13.0`).
-Yarn — через corepack (`packageManager` в корневом `package.json`); npm в проекте не использовать.
-Пакет в приложение: `yarn workspace web add <pkg>` / `yarn workspace api add <pkg>` — только с решения владельца.
+Монорепо **Yarn 4** workspaces (`packages/*`, `apps/*`, `nodeLinker: node-modules`), **Node 26 LTS** (`.nvmrc`).
+Yarn — через corepack; npm в проекте не использовать. Пакеты — `yarn workspace <web|api|@opinions/contracts> add` —
+только с решения владельца. Корневой `postinstall` собирает контракты.
 
-- `apps/web` — **Next.js 16** (App Router, React 19, Turbopack, `cacheComponents`). SSR/пререндер обязателен — нужен SEO:
-  контент страниц рендерится на сервере, метаданные через `metadata`, `robots.ts`, `sitemap.ts`;
-  базовый URL — `NEXT_PUBLIC_SITE_URL`. API Next 16 отличается от привычного: перед кодом смотреть
-  `node_modules/next/dist/docs/` (см. `apps/web/AGENTS.md`).
-- `apps/api` — **NestJS 12** (ESM, Vitest, oxlint). Все ручки под префиксом `/api`, порт `PORT` (4000), CORS на `WEB_ORIGIN`.
-  Пока есть только `GET /api/health`. Свежая дока Nest — https://docs.nestjs.com/llms.txt (см. `apps/api/AGENTS.md`).
-- Команды из корня: `yarn dev:web` (:3000), `yarn dev:api` (:4000), `yarn build`, `yarn lint`, `yarn test`.
-  CI — `.github/workflows/ci.yml` (install --immutable, lint, test, build, audit).
-  Конфиги превью в `.claude/launch.json`: `web`, `api`, `attach` (если :3000 уже поднят).
-- Деплой пока не настроен: GitHub Pages SSR не умеет, нужен Node-хостинг. Пуш в `main` — только по просьбе владельца.
+- `packages/contracts` — **@opinions/contracts**: zod-схемы и контракты эндпоинтов + типизированный клиент
+  (`@opinions/contracts/client`: таймауты, ретраи GET, проверка ответа). Общий для фронта и бэка.
+- `apps/web` — **Next.js 16** (App Router, SSR/пререндер ради SEO), архитектура **FSD** (`src/`), стили **Tailwind 4**.
+  Next 16 отличается от привычного — `node_modules/next/dist/docs/` и context7.
+- `apps/api` — **NestJS 12** (ESM) + **Drizzle** + **PostgreSQL 18** + **Redis 8 / BullMQ**. Все ручки под `/api`.
+  Дока Nest — https://docs.nestjs.com/llms.txt.
+- Локально: `docker compose up -d --wait` (Postgres + Redis), `cp apps/api/.env.example apps/api/.env`, `yarn dev`
+  (контракты в watch + api :4000 + web :3000; в dev Next проксирует `/api` на api). По отдельности: `yarn dev:web`, `yarn dev:api`.
+- Команды из корня: `yarn typecheck`, `yarn lint` (ESLint + Steiger + oxlint), `yarn test`, `yarn build`, `yarn format`.
+  Интеграционные тесты бэка: `yarn workspace api test:int` (нужен docker compose). Миграции: `yarn workspace api db:generate`.
+- Прод: свой VPS, Docker Compose из `deploy/` (Caddy → web/api, Postgres, Redis, миграции отдельным контейнером).
+  GitHub Pages больше не используется. CI — `.github/workflows/ci.yml` (проверки, интеграция с БД, сборка образов).
+  Пуш в `main` — только по просьбе владельца.
+- Конфиги превью в `.claude/launch.json`: `web`, `api`, `attach` (если :3000 уже поднят).
 
 ## Карта файлов
 
 | Путь | Что это |
 |---|---|
-| `apps/web/app/layout.tsx` | Корневой layout: `lang="ru"`, SEO-метаданные, viewport, preload шрифта |
-| `apps/web/app/page.tsx` | Лендинг: разметка героя рендерится на сервере (server component) |
-| `apps/web/app/landing-scripts.tsx` | Клиентский загрузчик старых модулей героя по порядку **после гидрации**; здесь же их `?v=N` |
-| `apps/web/app/landing.css` | Стили лендинга (импорт в layout, бандлит Next) |
-| `apps/web/public/js/landing.js` | Логика героя: вордмарк из капель (SDF + `smin`), флюидный курсор, хореография GSAP |
-| `apps/web/public/js/cloud-relief.js` | Облака на three.js: рельеф по heightmap/normal-картам, дрейф, 3D-наклон, фолбэк на `<img>` |
-| `apps/web/public/js/bust-section.js` | Секция с точечным бюстом (большой файл с данными точек — читать кусками) |
-| `apps/web/public/js/three.min.js`, `gsap.min.js` | three.js и GSAP 3.12.5, локальные (без CDN) |
+| `docs/architecture.md` | Принятые решения, поток данных, карта доменов (продукт → модуль Nest → контракты → слайсы FSD) |
+| `packages/contracts/src/core/` | `defineEndpoint` (типобезопасные контракты), `ApiError`, пагинация, примитивы (id, даты, текст) |
+| `packages/contracts/src/client/` | `createApiClient`: таймаут, ретраи GET с backoff+jitter, проверка ответа, типизированные ошибки |
+| `apps/web/app/` | Только роутинг Next: тонкие ре-экспорты из `src/` |
+| `apps/web/src/_app/` | Корневой layout, `styles/globals.css` (Tailwind, `@theme`, шрифты), базовые metadata, robots, sitemap |
+| `apps/web/src/_pages/home/` | Лендинг: `ui/hero.tsx`, `ui/landing-scripts.tsx` (грузит модули героя после гидрации), `landing.css` |
+| `apps/web/src/_pages/errors/` | Страницы ошибки, глобальной ошибки, 404 |
+| `apps/web/src/shared/lib/theme/`, `src/features/theme-switch/` | Две темы: скрипт до отрисовки, `applyTheme`/`useTheme`; переключатель (пока не размещён) |
+| `apps/web/src/shared/` | `api` (serverApi / userServerApi / browserApi), `config` (env на zod, site, security-headers), `ui`, `lib` |
+| `apps/web/public/js/` | Модули героя (vanilla JS): `landing.js`, `cloud-relief.js`, `bust-section.js`, `three.min.js`, `gsap.min.js` |
 | `apps/web/public/assets/` | Картинки, карты облаков, шрифты (`fonts/`), исходники бюста (`credits.json` — лицензии) |
-| `apps/web/security-headers.ts` | CSP и заголовки безопасности (подключены в `next.config.ts`) |
-| `apps/api/src/` | Nest: `main.ts` (bootstrap), `configure-app.ts` (заголовки, префикс, CORS, shutdown), `config/env.schema.ts` (zod-схема env), `app.module.ts` (config, throttler), health |
-| `.claude/rules/` | Правила кода (см. ниже) |
+| `apps/api/src/core/` | Инфраструктура: контракты, доступ, ошибки, БД, Redis, очереди, health, request-id, логи |
+| `apps/api/src/modules/` | Доменные модули (появятся по карте доменов) |
+| `apps/api/drizzle/` | SQL-миграции (генерирует drizzle-kit) |
+| `docker-compose.yml` | Postgres + Redis для разработки |
+| `deploy/` | Прод: Dockerfile'ы в приложениях, `docker-compose.prod.yml`, `Caddyfile`, `.env.example` |
+| `tsconfig.base.json` | Общая строгость TypeScript для всех пакетов |
 | `scripts/build_final_untesis_font.py` | Сборка шрифта Untesis (fonttools, skia-pathops) → `apps/web/public/assets/fonts/` |
 | `scripts/check.sh` | Быстрые проверки одной командой |
-| `Идеи.md` | Продуктовые идеи и ограничения дизайна |
 
 ## Правила кода
 
@@ -46,23 +55,27 @@ Yarn — через corepack (`packageManager` в корневом `package.json
 
 | Файл | Где действует | О чём |
 |---|---|---|
-| `.claude/rules/general.md` | везде | Документация через context7, TypeScript, безопасность (OWASP), устойчивость к отказам, тесты, эффективность |
-| `.claude/rules/web.md` | `apps/web/**` | SSR/SEO, Server/Client Components, Data Access Layer, CSP и заголовки, error boundaries, Core Web Vitals |
-| `.claude/rules/api.md` | `apps/api/**` | Модули Nest, валидация, guard'ы, rate limit, CORS, graceful shutdown, health, e2e-тесты |
-| `.claude/rules/hero.md` | `public/js/**`, `landing-scripts.tsx`, `landing.css` | WebGL-герой: загрузка после гидрации, `?v=N`, 60 FPS, фолбэки |
+| `.claude/rules/general.md` | везде | context7, TypeScript, безопасность (OWASP), устойчивость к отказам, тесты, эффективность |
+| `.claude/rules/contracts.md` | `packages/contracts`, `apps/api/src`, `shared/api` | Как описать ручку контрактом и использовать его на бэке и фронте |
+| `.claude/rules/web.md` | `apps/web/**` | FSD, SSR/SEO, данные через контракты, Tailwind, CSP, Core Web Vitals |
+| `.claude/rules/api.md` | `apps/api/**` | Структура Nest, Drizzle и миграции, доступ, rate limit, очереди, health, тесты |
+| `.claude/rules/hero.md` | `public/js/**`, `_pages/home/**` | WebGL-герой: загрузка после гидрации, Preflight, 60 FPS, фолбэки |
 
 Коротко, без чего изменение не принимается:
+- **Не править код, который не касается задачи.** Нужно тронуть что-то за её пределами — сначала спросить владельца.
 - **Доку библиотек — через context7** (`resolve-library-id` → `query-docs` с версией из `yarn.lock`), а не по памяти.
-- Каждый внешний вход валидируется схемой (zod), доступ проверяется на каждом эндпоинте и объекте, ошибки — fail closed.
-- Каждый исходящий вызов — с таймаутом; ретраи только идемпотентных, с backoff и jitter; ошибки не глотать.
+- Всё, что пересекает HTTP, описано контрактом; типы — из схем, ручных интерфейсов ответа нет.
+- Каждый внешний вход валидируется схемой, доступ проверяется на каждом эндпоинте и объекте, ошибки — fail closed.
+- Каждый исходящий вызов — с таймаутом; ретраи только идемпотентных, с backoff и jitter; долгое — в очередь.
 - Новый код — с тестами в том же изменении, покрытие ≥ 80%, тесты не ослаблять.
 - Новые зависимости, ORM, БД, UI-киты — только по решению владельца.
 - Коммиты: короткое английское сообщение в стиле истории (`feat: …`, `Fix …`), только по просьбе владельца.
 
 ## Как проверять изменения
 
-1. `bash scripts/check.sh` — синтаксис модулей героя, наличие файлов из `SCRIPTS`, поднятый `?v=`, lint и тесты
-   обоих приложений. Одна команда, агент не нужен. Перед коммитом — ещё `yarn build`; покрытие — `yarn workspace <web|api> test:cov`.
+1. `bash scripts/check.sh` — синтаксис модулей героя, наличие их файлов, typecheck, lint и тесты всех воркспейсов.
+   Одна команда, агент не нужен. Перед коммитом — ещё `yarn build` и `yarn format:check`;
+   покрытие — `yarn workspace <web|api|@opinions/contracts> test:cov`.
 2. Браузер — один заход: `preview_start` `name: "web"` → ожидание ~15 с (интро: белый экран, потом капли собирают вордмарк)
    → ошибки консоли → скриншот десктоп + 375px. Без повторных ожиданий.
    - Сначала `tabs_context`. Если панель скрыта — сразу попросить владельца её открыть (в скрытой панели нет rAF,

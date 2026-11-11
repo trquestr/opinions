@@ -1,0 +1,134 @@
+# Прод на своём VPS. Запуск из корня репозитория:
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
+# Наружу торчит только caddy (80/443). Postgres и Redis доступны лишь внутри сети backend.
+name: opinions-prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN:?Задайте DOMAIN в deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    logging: *default-logging
+
+  web:
+    image: ${REGISTRY:-opinions}/web:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # NEXT_PUBLIC_* вшиваются при сборке образа, а не при запуске.
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Задайте NEXT_PUBLIC_SITE_URL в deploy/.env}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:4000}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *default-logging
+
+  api:
+    image: ${REGISTRY:-opinions}/api:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      WEB_ORIGIN: ${WEB_ORIGIN:?Задайте WEB_ORIGIN в deploy/.env}
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-60000}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      DATABASE_URL: ${DATABASE_URL:?Задайте DATABASE_URL в deploy/.env}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    networks: [edge, backend]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
+  # Одноразовые миграции перед стартом api (тот же образ).
+  migrate:
+    image: ${REGISTRY:-opinions}/api:${TAG:-latest}
+    command: ['node', 'dist/migrate.js']
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Задайте DATABASE_URL в deploy/.env}
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Задайте POSTGRES_DB в deploy/.env}
+      POSTGRES_USER: ${POSTGRES_USER:?Задайте POSTGRES_USER в deploy/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в deploy/.env}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks: [backend]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+networks:
+  # Публичная сторона: caddy <-> web/api.
+  edge:
+  # БД и Redis: без выхода наружу; api подключён к обеим сетям.
+  backend:
+    internal: true
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,19 @@
+# Сборки и зависимости
+node_modules/
+.next/
+dist/
+coverage/
+.yarn/
+yarn.lock
+
+# Миграции генерирует drizzle-kit — не переформатируем
+apps/api/drizzle/
+
+# Старые модули героя (vanilla JS, минифицированные библиотеки) — форматирование вручную
+apps/web/public/
+
+# Документация и правила — markdown пишется руками
+*.md
+.claude/
+.codex/
+apps/web/next-env.d.ts

@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+/* Шрифты Untesis (капитель, только заглавные). Файлы лежат в public/assets/fonts. */
+@font-face {
+  font-family: 'Untesis';
+  src:
+    url('/assets/fonts/Untesis.woff2') format('woff2'),
+    url('/assets/fonts/Untesis.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Untesis Display';
+  src:
+    url('/assets/fonts/Untesis-Display.woff2') format('woff2'),
+    url('/assets/fonts/Untesis-Display.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+}
+
+/*
+ * Две темы. Светлая — по умолчанию (:root), тёмная включается атрибутом data-theme="dark" на <html>
+ * (его ставит скрипт из shared/lib/theme до отрисовки). Системная тема не учитывается.
+ *
+ * Контраст (WCAG, считано по относительной яркости), цель — не ниже 4.5:1:
+ *   светлая: muted #5E5E66 на background #FAFAF7 = 6.14:1 (на surface #FFFFFF = 6.42:1);
+ *            foreground #0E0E10 на background = 18.44:1
+ *   тёмная:  muted #A1A1AA на background #0E0E10 = 7.52:1 (на surface #17171A = 6.98:1);
+ *            foreground #EDEDE8 на background = 16.42:1
+ */
+:root {
+  color-scheme: light;
+  --background: #fafaf7;
+  --foreground: #0e0e10;
+  --muted: #5e5e66;
+  --surface: #ffffff;
+  --border: #e4e4df;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #0e0e10;
+  --foreground: #edede8;
+  --muted: #a1a1aa;
+  --surface: #17171a;
+  --border: #2a2a2f;
+}
+
+/* dark: работает от атрибута, а не от системной темы. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Токены дизайна: из них Tailwind делает утилиты font-display, bg-background, text-muted и т.д. */
+@theme {
+  --font-display: 'Untesis', 'Untesis Display', sans-serif;
+}
+
+/* inline: утилиты читают var(--background) напрямую, поэтому смена атрибута темы переключает цвета без пересборки. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+}

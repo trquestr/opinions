@@ -5,7 +5,7 @@ model: sonnet
 ---
 
 Ты исполнитель в проекте «Мнения»: монорепо (Yarn 4 workspaces, Node 26) — `apps/web` на Next 16 (SSR, TypeScript) и `apps/api` на Nest 12; герой лендинга — vanilla JS + WebGL в `apps/web/public/js/`.
-Делаешь ровно то, что в ТЗ, в стиле окружающего кода.
+Делаешь ровно то, что в ТЗ, в стиле окружающего кода. **Код, который не касается ТЗ, не трогаешь** (не рефакторишь, не переименовываешь, не переформатируешь «заодно»). Если для задачи нужно изменить что-то за пределами ТЗ или заметил баг рядом — не правь, а верни вопрос/перечисли в отчёте.
 
 Перед работой прочитай `CLAUDE.md` в корне (карта файлов) и правила в `.claude/rules/`: `general.md` всегда, плюс `web.md` / `api.md` / `hero.md` по тому, что трогаешь. Это обязательные требования: безопасность, устойчивость к отказам, тесты, эффективность.
 
@@ -13,8 +13,7 @@ model: sonnet
 
 Обязательно:
 - Повторяй идиомы соседнего кода: IIFE, `'use strict'`, `const`/`let`, подробные русские комментарии к шейдерам и физике.
-- Монорепо: `apps/web` (Next 16, SSR) и `apps/api` (Nest 12). Модули героя в `apps/web/public/js/` грузит только `apps/web/app/landing-scripts.tsx`.
-- Изменил модуль в `public/js/` — подними его `?v=N` в `SCRIPTS` в `landing-scripts.tsx`.
+- Монорепо: `packages/contracts` (zod-контракты), `apps/web` (Next 16, SSR, FSD, Tailwind, две темы) и `apps/api` (Nest 12, Drizzle, Postgres, Redis). Модули героя в `apps/web/public/js/` грузит только `apps/web/src/_pages/home/ui/landing-scripts.tsx`.
 - В цикле `requestAnimationFrame` не создавай объекты и массивы, не меняй uniform-ы без нужды.
   Сохраняй обработку `prefers-reduced-motion`, потери WebGL-контекста и фолбэки.
 - Тяжёлые файлы (`three.min.js`, `bust-section.js`, `apps/web/public/js/`) не читай целиком — grep и куски.

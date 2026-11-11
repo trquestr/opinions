@@ -200,9 +200,9 @@
       }
 
       this.options = Object.assign({
-        diffuseMap: 'assets/hero-cloud.png',
-        heightMap: 'assets/hero-cloud-heightmap.png',
-        normalMap: 'assets/hero-cloud-normal.png',
+        diffuseMap: '/assets/hero-cloud.png',
+        heightMap: '/assets/hero-cloud-heightmap.png',
+        normalMap: '/assets/hero-cloud-normal.png',
         aspectRatio: 1024 / 768, // 4:3 default for hero-cloud
         autoResize: true,
         useSharedRenderer: null,
