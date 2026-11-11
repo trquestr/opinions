@@ -105,7 +105,9 @@ jobs:
       - name: Smoke web
         run: |
           docker run -d --name web-smoke -p 3000:3000 untesis/web:ci
-          curl --retry 10 --retry-connrefused --retry-delay 2 -f -s -o /dev/null localhost:3000/ \
+          # --retry-all-errors: пока Next внутри стартует, docker-proxy уже принимает соединение и сбрасывает его
+          # (curl 56), а --retry-connrefused такие ошибки не повторяет.
+          curl --retry 15 --retry-all-errors --retry-delay 2 -fsS -o /dev/null http://localhost:3000/ \
             || { docker logs web-smoke; exit 1; }
       - name: Stop web
         if: always()
