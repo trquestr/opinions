@@ -1,5 +1,5 @@
 import { Body, Param, Query } from '@nestjs/common';
-import type { EndpointConfig } from '@opinions/contracts';
+import type { EndpointConfig } from '@untesis/contracts';
 import type { z } from 'zod';
 
 /** Контракт, у которого обязательно есть часть `K`. */

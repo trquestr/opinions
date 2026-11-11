@@ -1,6 +1,6 @@
 import 'server-only';
 import { cookies } from 'next/headers';
-import { createApiClient, type ApiClient } from '@opinions/contracts/client';
+import { createApiClient, type ApiClient } from '@untesis/contracts/client';
 import { serverEnv } from '@/shared/config/server-env';
 
 /**

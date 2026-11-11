@@ -1,5 +1,5 @@
 import { Controller } from '@nestjs/common';
-import { defineEndpoint } from '@opinions/contracts';
+import { defineEndpoint } from '@untesis/contracts';
 import { z } from 'zod';
 import { ContractBody, ContractParams, ContractQuery } from './contract-params.js';
 import { Endpoint } from './endpoint.decorator.js';

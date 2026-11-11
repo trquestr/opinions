@@ -42,13 +42,13 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_DB: opinions
-          POSTGRES_USER: opinions
-          POSTGRES_PASSWORD: opinions
+          POSTGRES_DB: untesis
+          POSTGRES_USER: untesis
+          POSTGRES_PASSWORD: untesis
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U opinions -d opinions"
+          --health-cmd "pg_isready -U untesis -d untesis"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
@@ -62,7 +62,7 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     env:
-      DATABASE_URL: postgres://opinions:opinions@localhost:5432/opinions
+      DATABASE_URL: postgres://untesis:untesis@localhost:5432/untesis
       REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v7
@@ -71,7 +71,7 @@ jobs:
           node-version-file: .nvmrc
       - run: npm i -g corepack@latest
       - run: corepack enable
-      # postinstall собирает @opinions/contracts - отдельная сборка api тестам не нужна (vitest читает src).
+      # postinstall собирает @untesis/contracts - отдельная сборка api тестам не нужна (vitest читает src).
       - run: yarn install --immutable
       - run: yarn workspace api test:int
 
@@ -96,7 +96,7 @@ jobs:
           file: apps/web/Dockerfile
           push: false
           load: true
-          tags: opinions/web:ci
+          tags: untesis/web:ci
           build-args: |
             NEXT_PUBLIC_SITE_URL=https://example.com
           cache-from: type=gha,scope=web
@@ -104,7 +104,7 @@ jobs:
       # Главная страница статична и в API при рендере не ходит - web поднимается без бэка.
       - name: Smoke web
         run: |
-          docker run -d --name web-smoke -p 3000:3000 opinions/web:ci
+          docker run -d --name web-smoke -p 3000:3000 untesis/web:ci
           curl --retry 10 --retry-connrefused --retry-delay 2 -f -s -o /dev/null localhost:3000/ \
             || { docker logs web-smoke; exit 1; }
       - name: Stop web

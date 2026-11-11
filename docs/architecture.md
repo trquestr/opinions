@@ -1,93 +1,94 @@
-# Архитектура «Мнений»
+# Untesis architecture
 
-Документ фиксирует решения и карту доменов. Продуктовая концепция — в `Идеи.md`. Правила кода — в `.claude/rules/`.
-Меняешь решение из этого документа — меняй документ в том же изменении.
+This document records the decisions and the domain map. Product concept — in `Идеи.md`. Code rules — in `.claude/rules/`.
+If you change a decision from this document, change the document in the same change.
 
-## Принятые решения
+## Accepted decisions
 
-| Решение | Выбор | Почему |
+| Decision | Choice | Why |
 |---|---|---|
-| Монорепо | Yarn 4 workspaces: `apps/web`, `apps/api`, `packages/contracts` | Общие контракты без публикации пакетов, одна установка, один CI |
-| Фронт | Next.js 16 App Router, SSR/пререндер | SEO: контент мнений и вопросов индексируется |
-| Архитектура фронта | Feature-Sliced Design (`_app`, `_pages`, `widgets`, `features`, `entities`, `shared`), линтер Steiger | Предсказуемые границы, импорт только вниз |
-| Стили | Tailwind CSS 4 (токены в `@theme`) | Быстрая вёрстка без своих CSS-модулей; герой лендинга — исключение (`landing.css`) |
-| Темы | Светлая (по умолчанию) и тёмная, мягкий монохром; семантические токены, выбор в localStorage, скрипт до отрисовки | Без мигания и без динамического рендера (SEO); герой лендинга всегда светлый |
-| Бэк | NestJS 12 | Модули на домен, DI, guard'ы, первые пакеты для очередей/БД |
-| Контракты | `@opinions/contracts`: zod-схемы эндпоинтов, типы выводятся из схем | Один источник правды для фронта и бэка, ответ проверяется с обеих сторон |
-| БД | PostgreSQL 18 + Drizzle ORM, миграции drizzle-kit (SQL в `apps/api/drizzle/`) | Схема в TS, SQL-близко, `uuidv7()` в базе |
-| Кэш и очереди | Redis 8 + BullMQ | Вопрос дня, повторы старых вопросов, напоминания, ИИ-разбор — фоновые задачи |
-| Вход | Telegram Login + email-код (без паролей) | Telegram — главный канал шеринга; email — запасной |
-| Сессии | Своя сессия: непрозрачный id в cookie `__Host-session` (HttpOnly, Secure, SameSite=Lax), запись в Postgres, скользящий срок | Отзыв сессии мгновенный, никаких JWT в браузере |
-| Прод | Свой VPS, Docker Compose: Caddy (HTTPS) → web / api, Postgres, Redis | Один домен: `/api/*` → Nest, остальное → Next; cookie без CORS |
+| Monorepo | Yarn 4 workspaces: `apps/web`, `apps/api`, `packages/contracts` | Shared contracts without publishing packages, one install, one CI |
+| Frontend | Next.js 16 App Router, SSR/prerender | SEO: the content of opinions and questions is indexed |
+| Frontend architecture | Feature-Sliced Design (`_app`, `_pages`, `widgets`, `features`, `entities`, `shared`), Steiger linter | Predictable boundaries, imports only downward |
+| Styles | Tailwind CSS 4 (tokens in `@theme`) | Fast markup without custom CSS modules; the landing hero is the exception (`landing.css`) |
+| Themes | Light (default) and dark, soft monochrome; semantic tokens, choice stored in localStorage, pre-paint script | No flicker and no dynamic rendering (SEO); the landing hero is always light |
+| Backend | NestJS 12 | A module per domain, DI, guards, first-class packages for queues/DB |
+| Contracts | `@untesis/contracts`: zod endpoint schemas, types are derived from the schemas | One source of truth for the frontend and the backend, the response is validated on both sides |
+| DB | PostgreSQL 18 + Drizzle ORM, drizzle-kit migrations (SQL in `apps/api/drizzle/`) | Schema in TS, close to SQL, `uuidv7()` in the database |
+| Cache and queues | Redis 8 + BullMQ | Question of the day, revisits of old questions, reminders, AI analysis — background jobs |
+| Sign-in | Telegram Login + email code (no passwords) | Telegram is the main sharing channel; email is the fallback |
+| Sessions | Own session: an opaque id in the `__Host-session` cookie (HttpOnly, Secure, SameSite=Lax), a record in Postgres, sliding expiry | Instant session revocation, no JWTs in the browser |
+| Production | Own VPS, Docker Compose: Caddy (HTTPS) → web / api, Postgres, Redis | One domain: `/api/*` → Nest, the rest → Next; cookie without CORS |
 
-## Как идут данные
+## Data flow
 
 ```
-Браузер ──► Caddy ──► /api/* ──► Nest (apps/api) ──► Postgres / Redis
-                 └──► /*     ──► Next (apps/web) ──► (SSR) ──► Nest по внутренней сети (API_INTERNAL_URL)
+Browser ──► Caddy ──► /api/* ──► Nest (apps/api) ──► Postgres / Redis
+                 └──► /*     ──► Next (apps/web) ──► (SSR) ──► Nest over the internal network (API_INTERNAL_URL)
 ```
 
-- Публичные страницы (вопрос, мнение, профиль) рендерятся на сервере Next: `serverApi` ходит в Nest без cookie,
-  ответы кэшируются (`"use cache"` + теги). Личные данные — `userServerApi()` с cookie сессии (динамический рендер).
-- Браузер ходит в тот же origin `/api` (`browserApi`) — CORS и сторонние cookie не нужны.
-- Каждая ручка описана контрактом. Nest не запустится, если у маршрута нет `@Endpoint(contract)`;
-  ответ обработчика прогоняется через схему (лишние поля отрезаются, несовпадение = 500 + лог).
-- Ошибки любого происхождения — в одном формате `ApiError` (`code`, `message`, `issues`, `requestId`).
+- Public pages (question, opinion, profile) are rendered on the Next server: `serverApi` calls Nest without a cookie,
+  responses are cached (`"use cache"` + tags). Personal data — `userServerApi()` with the session cookie (dynamic
+  rendering).
+- The browser calls the same origin `/api` (`browserApi`) — no CORS or third-party cookies needed.
+- Every endpoint is described by a contract. Nest will not start if a route has no `@Endpoint(contract)`;
+  the handler's response is run through the schema (extra fields are stripped, a mismatch = 500 + log).
+- Errors of any origin use a single format, `ApiError` (`code`, `message`, `issues`, `requestId`).
 
-## Карта доменов
+## Domain map
 
-Слой продукта → модуль Nest (`apps/api/src/modules/<домен>`), контракты (`packages/contracts/src/<домен>`),
-слайсы FSD. «Слой 1» делаем первым; остальное — только когда понадобится, но границы уже такие.
+Product layer → Nest module (`apps/api/src/modules/<domain>`), contracts (`packages/contracts/src/<domain>`),
+FSD slices. "Layer 1" is built first; the rest only when needed, but the boundaries are already like this.
 
-| Домен | Что внутри | Слой продукта | FSD |
+| Domain | What is inside | Product layer | FSD |
 |---|---|---|---|
-| `auth` | Telegram Login, email-код, сессии, выход | 1 | `features/auth-by-telegram`, `features/auth-by-email` |
-| `users` / `profiles` | Пользователь, публичный профиль-библиотека, handle, настройки тем и «серой морали», приватность по умолчанию | 1 | `entities/user`, `_pages/profile` |
-| `topics` | Темы (работа, деньги, отношения, этика, технологии…), скрытые темы пользователя, уровни тем | 1 | `entities/topic`, `features/topic-filter` |
-| `questions` | Библиотека вопросов, настроение (полегче/поострее), чувствительность, «похожий вопрос» | 1 | `entities/question`, `_pages/question` |
-| `daily` | Вопрос дня (выбор по расписанию, BullMQ job scheduler, часовой пояс пользователя) | 1 | `widgets/daily-question` |
-| `opinions` | Мнение = позиция + короткий текст + строка «потому что», публичное/«только для себя» | 1 | `entities/opinion`, `features/answer-question` |
-| `revisions` | Повтор старых вопросов, отметка «мнение изменилось», таймлайн дрейфа | 1 | `features/revisit-opinion`, `widgets/opinion-timeline` |
-| `streaks` | Серия дней подряд (по календарной дате пользователя) | 1 | `widgets/streak` |
-| `cards` | Карточка мнения для Telegram/X (OG-картинка через `next/og`), годовой итог | 1 | `features/share-opinion` |
-| `search` | Поиск по своей библиотеке, потом — по вопросам и мнениям (Postgres FTS) | 1–4 | `features/search` |
-| `export` | Экспорт библиотеки файлом (фоновая задача) | 1 | `features/export-library` |
-| `social` | Реакции, «согласен/не согласен», комментарии, подписки | 2 | `features/react-to-opinion`, `features/comment` |
-| `moderation` | Жалобы, блокировки, скрытие комментариев | 2 | `features/report`, `features/block-user` |
-| `matching` | «Единомышленник», «противоположность», «близнец по мнению» (векторы ответов, пересчёт в фоне) | 2–4 | `widgets/like-minded` |
-| `analysis` | Бесплатно: противоречия, карта взглядов. Платно: ИИ-разбор (фоновая задача, LLM) | 3 | `_pages/analysis` |
-| `billing` | Оплата ИИ-разбора, позже — значки и эффекты | 3 | `features/purchase-analysis` |
-| `achievements` | Ачивки, значки, эффекты профиля | 3 | `entities/achievement` |
-| `notifications` | Напоминания с настроением (Telegram-бот, email), настройки | 1–2 | `features/notification-settings` |
-| `recommendations` | Похожие темы, популярное, «покажи тех, кто думает иначе», настройки подбора | 4 | `widgets/recommendations` |
+| `auth` | Telegram Login, email code, sessions, sign-out | 1 | `features/auth-by-telegram`, `features/auth-by-email` |
+| `users` / `profiles` | User, public profile-library, handle, theme and "gray morality" settings, private by default | 1 | `entities/user`, `_pages/profile` |
+| `topics` | Topics (work, money, relationships, ethics, technology…), the user's hidden topics, topic levels | 1 | `entities/topic`, `features/topic-filter` |
+| `questions` | Question library, mood (lighter/sharper), sensitivity, "similar question" | 1 | `entities/question`, `_pages/question` |
+| `daily` | Question of the day (scheduled selection, BullMQ job scheduler, the user's time zone) | 1 | `widgets/daily-question` |
+| `opinions` | Opinion = position + short text + a "because" line, public / "for myself only" | 1 | `entities/opinion`, `features/answer-question` |
+| `revisions` | Revisiting old questions, the "opinion changed" mark, drift timeline | 1 | `features/revisit-opinion`, `widgets/opinion-timeline` |
+| `streaks` | Streak of consecutive days (by the user's calendar date) | 1 | `widgets/streak` |
+| `cards` | Opinion card for Telegram/X (OG image via `next/og`), year in review | 1 | `features/share-opinion` |
+| `search` | Search over one's own library, later — over questions and opinions (Postgres FTS) | 1–4 | `features/search` |
+| `export` | Library export as a file (background job) | 1 | `features/export-library` |
+| `social` | Reactions, "agree/disagree", comments, follows | 2 | `features/react-to-opinion`, `features/comment` |
+| `moderation` | Reports, blocks, hiding comments | 2 | `features/report`, `features/block-user` |
+| `matching` | "Like-minded", "opposite", "opinion twin" (answer vectors, recomputed in the background) | 2–4 | `widgets/like-minded` |
+| `analysis` | Free: contradictions, map of views. Paid: AI analysis (background job, LLM) | 3 | `_pages/analysis` |
+| `billing` | Payment for AI analysis, later — badges and effects | 3 | `features/purchase-analysis` |
+| `achievements` | Achievements, badges, profile effects | 3 | `entities/achievement` |
+| `notifications` | Reminders with a mood (Telegram bot, email), settings | 1–2 | `features/notification-settings` |
+| `recommendations` | Similar topics, popular, "show those who think differently", selection settings | 4 | `widgets/recommendations` |
 
-Принципиально нет (см. `Идеи.md`): деревьев аргументов, обязательных «за/против», общей ленты как в Twitter.
+Deliberately absent (see `Идеи.md`): argument trees, mandatory "for/against", a general feed like Twitter's.
 
-## Данные: соглашения
+## Data: conventions
 
-- Таблицы — в `apps/api/src/core/database/schema/<домен>.ts`, имена `snake_case`, PK `uuid` по `uuidv7()`,
-  время — `timestamptz`, `created_at`/`updated_at` через хелперы `columns.ts`.
-- Внешние ключи с явным `ON DELETE`; индексы — под реальные запросы (курсорные списки — `(created_at, id)`).
-- Приватность — в данных, а не в UI: «только для себя» фильтруется в запросе репозитория, публичные ручки
-  физически не выбирают приватные строки.
-- Изменения схемы — только миграциями (`yarn workspace api db:generate`), миграции не правятся после коммита.
-- Мнение не перезаписывается: изменение позиции — новая ревизия (это и есть таймлайн дрейфа).
+- Tables live in `apps/api/src/core/database/schema/<domain>.ts`, names in `snake_case`, PK `uuid` via `uuidv7()`,
+  time — `timestamptz`, `created_at`/`updated_at` via the `columns.ts` helpers.
+- Foreign keys with an explicit `ON DELETE`; indexes — for real queries (cursor lists — `(created_at, id)`).
+- Privacy lives in the data, not in the UI: "for myself only" is filtered in the repository query, public endpoints
+  physically never select private rows.
+- Schema changes — only via migrations (`yarn workspace api db:generate`), migrations are not edited after commit.
+- An opinion is not overwritten: a change of position is a new revision (this is the drift timeline).
 
-## Фоновые задачи (BullMQ)
+## Background jobs (BullMQ)
 
-| Очередь | Задачи |
+| Queue | Jobs |
 |---|---|
-| `daily` | Выбор вопроса дня, рассылка напоминаний по часовым поясам |
-| `revisits` | Подбор старых вопросов для повтора |
-| `cards` | Рендер больших карточек и годовых итогов |
-| `export` | Сбор архива библиотеки |
-| `analysis` | ИИ-разбор (долгий, с ретраями и идемпотентностью по id заказа) |
-| `matching` | Пересчёт похожести пользователей |
+| `daily` | Selecting the question of the day, sending reminders by time zone |
+| `revisits` | Selecting old questions for a revisit |
+| `cards` | Rendering large cards and year-in-review |
+| `export` | Assembling the library archive |
+| `analysis` | AI analysis (long, with retries and idempotency by order id) |
+| `matching` | Recomputing user similarity |
 
-Задача — идемпотентна (повтор не дублирует результат), с лимитом попыток и backoff (настройки по умолчанию — в `QueueModule`).
+A job is idempotent (a retry does not duplicate the result), with an attempt limit and backoff (defaults are in `QueueModule`).
 
-## Окружения
+## Environments
 
-- Локально: `docker compose up -d --wait` (Postgres + Redis), `yarn dev` (контракты в watch, api, web).
-- Прод: `deploy/` — Dockerfile'ы приложений, `docker-compose.prod.yml`, `Caddyfile`; миграции — отдельным
-  одноразовым контейнером перед стартом api.
+- Locally: `docker compose up -d --wait` (Postgres + Redis), `yarn dev` (contracts in watch mode, api, web).
+- Production: `deploy/` — the apps' Dockerfiles, `docker-compose.prod.yml`, `Caddyfile`; migrations — in a separate
+  one-off container before api starts.

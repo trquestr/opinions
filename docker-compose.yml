@@ -1,20 +1,20 @@
 # Только для локальной разработки: Postgres и Redis для apps/api.
 # Запуск: docker compose up -d --wait
-name: opinions
+name: untesis
 
 services:
   postgres:
     image: postgres:18-alpine
     environment:
-      POSTGRES_DB: opinions
-      POSTGRES_USER: opinions
-      POSTGRES_PASSWORD: opinions
+      POSTGRES_DB: untesis
+      POSTGRES_USER: untesis
+      POSTGRES_PASSWORD: untesis
     ports:
       - '5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U opinions -d opinions']
+      test: ['CMD-SHELL', 'pg_isready -U untesis -d untesis']
       interval: 3s
       timeout: 3s
       retries: 20

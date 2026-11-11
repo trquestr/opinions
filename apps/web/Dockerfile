@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Образ apps/web (Next standalone). Контекст сборки — КОРЕНЬ репозитория:
-#   docker build -f apps/web/Dockerfile --build-arg NEXT_PUBLIC_SITE_URL=https://example.com -t opinions/web .
+#   docker build -f apps/web/Dockerfile --build-arg NEXT_PUBLIC_SITE_URL=https://example.com -t untesis/web .
 #
 # Тег node:26.13-alpine закреплён по .nvmrc (26.13.0); существование тега проверяет CI (docker build).
 
@@ -15,7 +15,7 @@ FROM base AS deps
 COPY package.json yarn.lock .yarnrc.yml tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
-# Корневой postinstall собирает @opinions/contracts (tsc), поэтому его исходники нужны уже на этом шаге.
+# Корневой postinstall собирает @untesis/contracts (tsc), поэтому его исходники нужны уже на этом шаге.
 COPY packages/contracts packages/contracts
 RUN --mount=type=cache,target=/root/.yarn/berry/cache \
     yarn install --immutable

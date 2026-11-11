@@ -11,7 +11,7 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     // Обязательные переменные без дефолтов; сети в unit-тестах нет (подключения ленивые или подменены).
     env: {
-      DATABASE_URL: 'postgres://opinions:opinions@localhost:5432/opinions',
+      DATABASE_URL: 'postgres://untesis:untesis@localhost:5432/untesis',
       REDIS_URL: 'redis://localhost:6379',
     },
     coverage: {

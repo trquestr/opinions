@@ -10,7 +10,7 @@ export default defineConfig({
     include: ['test/integration/*.int-spec.ts'],
     testTimeout: 20000,
     env: {
-      DATABASE_URL: process.env.DATABASE_URL ?? 'postgres://opinions:opinions@localhost:5432/opinions',
+      DATABASE_URL: process.env.DATABASE_URL ?? 'postgres://untesis:untesis@localhost:5432/untesis',
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
     },
   },

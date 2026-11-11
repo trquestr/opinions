@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import type { readinessContract, ResponseInput } from '@opinions/contracts';
+import type { readinessContract, ResponseInput } from '@untesis/contracts';
 import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { DATABASE, type Database } from '../database/database.types.js';

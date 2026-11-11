@@ -2,5 +2,6 @@ export const siteConfig = {
   name: 'UNTESIS',
   lang: 'ru',
   locale: 'ru_RU',
-  description: 'Мнения: площадка, где мнение — это один короткий простой ответ на вопрос.',
+  description:
+    'Untesis — личная библиотека твоих мнений: один вопрос в день, короткий ответ и история того, как меняются взгляды.',
 } as const;

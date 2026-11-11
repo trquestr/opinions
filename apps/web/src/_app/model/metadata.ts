@@ -6,7 +6,7 @@ import { publicEnv, siteConfig } from '@/shared/config';
 export const metadata: Metadata = {
   metadataBase: new URL(publicEnv.NEXT_PUBLIC_SITE_URL),
   title: {
-    default: `${siteConfig.name} — Мнения`,
+    default: siteConfig.name,
     template: `%s — ${siteConfig.name}`,
   },
   description: siteConfig.description,

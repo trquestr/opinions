@@ -1,8 +1,8 @@
 {
-  "name": "@opinions/contracts",
+  "name": "@untesis/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Контракты API «Мнений»: zod-схемы и типы, общие для apps/web и apps/api",
+  "description": "Untesis API contracts: zod schemas and types shared by apps/web and apps/api",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -22,7 +22,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --type-aware src/",
     "test": "vitest run",
     "test:cov": "vitest run --coverage"
   },
@@ -32,6 +32,8 @@
   "devDependencies": {
     "@types/node": "^26",
     "@vitest/coverage-v8": "^5.1.0",
+    "oxlint": "^1.58.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
     "vitest": "^5.1.0",

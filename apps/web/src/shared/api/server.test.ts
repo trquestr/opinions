@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { healthContract } from '@opinions/contracts';
+import { healthContract } from '@untesis/contracts';
 
 const cookieString = vi.fn<() => string>();
 vi.mock('next/headers', () => ({

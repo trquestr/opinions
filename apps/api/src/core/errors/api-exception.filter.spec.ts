@@ -8,7 +8,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
-import { apiErrorSchema } from '@opinions/contracts';
+import { apiErrorSchema } from '@untesis/contracts';
 import { ApiExceptionFilter, apiException } from './api-exception.filter.js';
 import { createValidationPipe } from './validation.pipe.js';
 
@@ -38,7 +38,14 @@ describe('ApiExceptionFilter', () => {
   });
 
   it('берёт валидный code из тела исключения и issues', () => {
-    const { body } = run(apiException(409, 'CONFLICT', 'Уже есть', [{ path: ['a', 0], message: 'dup' }]));
+    const { body } = run(
+      apiException({
+        status: 409,
+        code: 'CONFLICT',
+        message: 'Уже есть',
+        issues: [{ path: ['a', 0], message: 'dup' }],
+      }),
+    );
     expect(body).toMatchObject({
       statusCode: 409,
       code: 'CONFLICT',

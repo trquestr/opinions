@@ -1,33 +1,33 @@
-# Деплой на VPS
+# Deploying to a VPS
 
-Docker Compose: Caddy (HTTPS) -> web / api, Postgres, Redis. Наружу открыты только 80/443.
-Все команды - из корня репозитория. Для краткости: `DC="docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env"`.
+Docker Compose: Caddy (HTTPS) -> web / api, Postgres, Redis. Only 80/443 are exposed externally.
+All commands are run from the repository root. For brevity: `DC="docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env"`.
 
-## Первый запуск
+## First run
 
-1. Направьте DNS домена на VPS, откройте порты 80, 443 (tcp) и 443 (udp).
-2. `cp deploy/.env.example deploy/.env`, заполните (домен, **пароль Postgres**, DATABASE_URL, WEB_ORIGIN, NEXT_PUBLIC_SITE_URL).
-3. `$DC up -d --build` - соберёт образы, применит миграции, поднимет сервисы.
-4. `$DC ps` - все сервисы `healthy`, `migrate` - `exited (0)`.
+1. Point the domain's DNS at the VPS, open ports 80, 443 (tcp) and 443 (udp).
+2. `cp deploy/.env.example deploy/.env`, fill it in (domain, **Postgres password**, DATABASE_URL, WEB_ORIGIN, NEXT_PUBLIC_SITE_URL).
+3. `$DC up -d --build` - builds the images, applies the migrations, starts the services.
+4. `$DC ps` - all services are `healthy`, `migrate` is `exited (0)`.
 
-## Обновление
+## Updating
 
-`git pull && $DC up -d --build`. Миграции применяются автоматически перед стартом api.
-Образы из реестра: задайте `REGISTRY`/`TAG` в `.env`, затем `$DC pull && $DC up -d`.
+`git pull && $DC up -d --build`. Migrations are applied automatically before api starts.
+Images from a registry: set `REGISTRY`/`TAG` in `.env`, then `$DC pull && $DC up -d`.
 
-## Откат
+## Rollback
 
-`git checkout <предыдущий коммит> && $DC up -d --build` (или прежний `TAG` из реестра).
-Применённые миграции назад не откатываются - деструктивные меняйте в два шага.
+`git checkout <previous commit> && $DC up -d --build` (or the previous `TAG` from the registry).
+Applied migrations are not rolled back - make destructive changes in two steps.
 
-## Логи
+## Logs
 
-`$DC logs -f --tail=100 api` (или `web`, `caddy`, `postgres`). Ротация: 5 файлов по 10 МБ на сервис.
+`$DC logs -f --tail=100 api` (or `web`, `caddy`, `postgres`). Rotation: 5 files of 10 MB per service.
 
-## Бэкап Postgres
+## Postgres backup
 
 ```
 $DC exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > backup-$(date +%F).sql.gz
 ```
 
-Восстановление: `gunzip -c backup.sql.gz | $DC exec -T postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"'`.
+Restore: `gunzip -c backup.sql.gz | $DC exec -T postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"'`.

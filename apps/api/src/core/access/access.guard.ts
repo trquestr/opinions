@@ -1,6 +1,6 @@
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { EndpointConfig } from '@opinions/contracts';
+import type { EndpointConfig } from '@untesis/contracts';
 import type { Request } from 'express';
 import { ENDPOINT_CONTRACT } from '../contracts/endpoint.decorator.js';
 import { apiException } from '../errors/api-exception.filter.js';
@@ -22,12 +22,12 @@ export class AccessGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!contract) throw apiException(403, 'FORBIDDEN', 'Доступ запрещён');
+    if (!contract) throw apiException({ status: 403, code: 'FORBIDDEN', message: 'Доступ запрещён' });
     if (contract.access === 'public') return true;
 
     const request = context.switchToHttp().getRequest<Request>();
     if (request.user === undefined || request.user === null) {
-      throw apiException(401, 'UNAUTHORIZED', 'Требуется вход');
+      throw apiException({ status: 401, code: 'UNAUTHORIZED', message: 'Требуется вход' });
     }
     return true;
   }

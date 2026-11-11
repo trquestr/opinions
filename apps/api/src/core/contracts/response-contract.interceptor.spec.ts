@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { defineEndpoint } from '@opinions/contracts';
+import { defineEndpoint } from '@untesis/contracts';
 import { lastValueFrom, of } from 'rxjs';
 import { z } from 'zod';
 import { ENDPOINT_CONTRACT } from './endpoint.decorator.js';

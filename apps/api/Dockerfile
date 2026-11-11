@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Образ apps/api. Контекст сборки — КОРЕНЬ репозитория:
-#   docker build -f apps/api/Dockerfile -t opinions/api .
+#   docker build -f apps/api/Dockerfile -t untesis/api .
 #
 # Тег node:26.13-alpine закреплён по .nvmrc (26.13.0); существование тега проверяет CI (docker build).
 
@@ -15,7 +15,7 @@ FROM base AS deps
 COPY package.json yarn.lock .yarnrc.yml tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
-# Корневой postinstall собирает @opinions/contracts (tsc), поэтому его исходники нужны уже на этом шаге.
+# Корневой postinstall собирает @untesis/contracts (tsc), поэтому его исходники нужны уже на этом шаге.
 COPY packages/contracts packages/contracts
 RUN --mount=type=cache,target=/root/.yarn/berry/cache \
     yarn install --immutable
@@ -43,9 +43,9 @@ RUN --mount=type=cache,target=/root/.yarn/berry/cache \
 FROM node:26.13-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production PORT=4000
-# node_modules (в т.ч. симлинк @opinions/contracts -> packages/contracts) и package.json воркспейсов.
+# node_modules (в т.ч. симлинк @untesis/contracts -> packages/contracts) и package.json воркспейсов.
 COPY --from=prod-deps /app/ ./
-# Собранный contracts: резолвится через симлинк node_modules/@opinions/contracts.
+# Собранный contracts: резолвится через симлинк node_modules/@untesis/contracts.
 COPY --from=build /app/packages/contracts/dist packages/contracts/dist
 COPY --from=build /app/apps/api/dist apps/api/dist
 # Миграции: migrate.js ищет их в ../drizzle относительно dist.

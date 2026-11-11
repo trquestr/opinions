@@ -8,22 +8,26 @@ import {
   type ApiError,
   type ApiErrorCode,
   type ApiErrorIssue,
-} from '@opinions/contracts';
+} from '@untesis/contracts';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 
 const INTERNAL_MESSAGE = 'Внутренняя ошибка сервера';
 
+/** Описание ошибки для доменного кода; `issues` — только для ошибок валидации по полям. */
+export interface ApiExceptionInit {
+  readonly status: number;
+  readonly code: ApiErrorCode;
+  readonly message: string;
+  readonly issues?: readonly ApiErrorIssue[];
+}
+
 /**
- * Исключение с кодом из контракта ошибок — для доменного кода (`throw apiException(404, 'NOT_FOUND', '…')`).
+ * Исключение с кодом из контракта ошибок — для доменного кода:
+ * `throw apiException({ status: 404, code: 'NOT_FOUND', message: 'Мнение не найдено' })`.
  * Фильтр отдаст его в формате ApiError без переделок.
  */
-export function apiException(
-  status: number,
-  code: ApiErrorCode,
-  message: string,
-  issues?: readonly ApiErrorIssue[],
-): HttpException {
+export function apiException({ status, code, message, issues }: ApiExceptionInit): HttpException {
   return new HttpException({ code, message, ...(issues ? { issues } : {}) }, status);
 }
 

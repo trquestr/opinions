@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { healthContract } from '@opinions/contracts';
+import { healthContract } from '@untesis/contracts';
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -1,115 +1,132 @@
-# «Мнения»
+# Untesis
 
-Продукт «Мнения»: личная библиотека мнений — каждый день вопрос, короткий ответ, история изменений взглядов
-(концепция — `Идеи.md`, архитектура и карта доменов — `docs/architecture.md`). Сейчас готовы промо-лендинг
-с WebGL-героем и инфраструктура под домены; доменных функций ещё нет. Владелец общается по-русски — отвечай по-русски.
+**The owner communicates in Russian — always reply in Russian.** Code comments in the project are written in Russian;
+UI texts are Russian.
 
-## Стек и запуск
+The Untesis product: a personal library of opinions — a question every day, a short answer, a history of how views
+change (concept — `Идеи.md`, architecture and domain map — `docs/architecture.md`). Currently ready: the promo
+landing with the WebGL hero and the infrastructure for the domains; there are no domain features yet.
 
-Монорепо **Yarn 4** workspaces (`packages/*`, `apps/*`, `nodeLinker: node-modules`), **Node 26 LTS** (`.nvmrc`).
-Yarn — через corepack; npm в проекте не использовать. Пакеты — `yarn workspace <web|api|@opinions/contracts> add` —
-только с решения владельца. Корневой `postinstall` собирает контракты.
+## Stack and running
 
-- `packages/contracts` — **@opinions/contracts**: zod-схемы и контракты эндпоинтов + типизированный клиент
-  (`@opinions/contracts/client`: таймауты, ретраи GET, проверка ответа). Общий для фронта и бэка.
-- `apps/web` — **Next.js 16** (App Router, SSR/пререндер ради SEO), архитектура **FSD** (`src/`), стили **Tailwind 4**.
-  Next 16 отличается от привычного — `node_modules/next/dist/docs/` и context7.
-- `apps/api` — **NestJS 12** (ESM) + **Drizzle** + **PostgreSQL 18** + **Redis 8 / BullMQ**. Все ручки под `/api`.
-  Дока Nest — https://docs.nestjs.com/llms.txt.
-- Локально: `docker compose up -d --wait` (Postgres + Redis), `cp apps/api/.env.example apps/api/.env`, `yarn dev`
-  (контракты в watch + api :4000 + web :3000; в dev Next проксирует `/api` на api). По отдельности: `yarn dev:web`, `yarn dev:api`.
-- Команды из корня: `yarn typecheck`, `yarn lint` (ESLint + Steiger + oxlint), `yarn test`, `yarn build`, `yarn format`.
-  Интеграционные тесты бэка: `yarn workspace api test:int` (нужен docker compose). Миграции: `yarn workspace api db:generate`.
-- Прод: свой VPS, Docker Compose из `deploy/` (Caddy → web/api, Postgres, Redis, миграции отдельным контейнером).
-  GitHub Pages больше не используется. CI — `.github/workflows/ci.yml` (проверки, интеграция с БД, сборка образов).
-  Пуш в `main` — только по просьбе владельца.
-- Конфиги превью в `.claude/launch.json`: `web`, `api`, `attach` (если :3000 уже поднят).
+**Yarn 4** workspaces monorepo (`packages/*`, `apps/*`, `nodeLinker: node-modules`), **Node 26 LTS** (`.nvmrc`).
+Yarn runs via corepack; do not use npm in the project. Packages (`yarn workspace <web|api|@untesis/contracts> add`)
+only by the owner's decision. The root `postinstall` builds the contracts.
 
-## Карта файлов
+- `packages/contracts` — **@untesis/contracts**: zod schemas and endpoint contracts + a typed client
+  (`@untesis/contracts/client`: timeouts, GET retries, response validation). Shared by the frontend and the backend.
+- `apps/web` — **Next.js 16** (App Router, SSR/prerender for SEO), **FSD** architecture (`src/`), **Tailwind 4** styles.
+  Next 16 differs from what you are used to — see `node_modules/next/dist/docs/` and context7.
+- `apps/api` — **NestJS 12** (ESM) + **Drizzle** + **PostgreSQL 18** + **Redis 8 / BullMQ**. All endpoints are under
+  `/api`. Nest docs — https://docs.nestjs.com/llms.txt.
+- Locally: `docker compose up -d --wait` (Postgres + Redis), `cp apps/api/.env.example apps/api/.env`, `yarn dev`
+  (contracts in watch mode + api :4000 + web :3000; in dev Next proxies `/api` to the api). Separately: `yarn dev:web`,
+  `yarn dev:api`.
+- Commands from the root: `yarn typecheck`, `yarn lint` (ESLint + Steiger + oxlint), `yarn test`, `yarn build`,
+  `yarn format`. Backend integration tests: `yarn workspace api test:int` (needs docker compose). Migrations:
+  `yarn workspace api db:generate`.
+- Production: own VPS, Docker Compose from `deploy/` (Caddy → web/api, Postgres, Redis, migrations in a separate
+  container). GitHub Pages is no longer used. CI — `.github/workflows/ci.yml` (checks, integration tests with the DB,
+  image builds). Push to `main` — only at the owner's request.
+- Preview configs in `.claude/launch.json`: `web`, `api`, `attach` (if :3000 is already up).
 
-| Путь | Что это |
+## File map
+
+| Path | What it is |
 |---|---|
-| `docs/architecture.md` | Принятые решения, поток данных, карта доменов (продукт → модуль Nest → контракты → слайсы FSD) |
-| `packages/contracts/src/core/` | `defineEndpoint` (типобезопасные контракты), `ApiError`, пагинация, примитивы (id, даты, текст) |
-| `packages/contracts/src/client/` | `createApiClient`: таймаут, ретраи GET с backoff+jitter, проверка ответа, типизированные ошибки |
-| `apps/web/app/` | Только роутинг Next: тонкие ре-экспорты из `src/` |
-| `apps/web/src/_app/` | Корневой layout, `styles/globals.css` (Tailwind, `@theme`, шрифты), базовые metadata, robots, sitemap |
-| `apps/web/src/_pages/home/` | Лендинг: `ui/hero.tsx`, `ui/landing-scripts.tsx` (грузит модули героя после гидрации), `landing.css` |
-| `apps/web/src/_pages/errors/` | Страницы ошибки, глобальной ошибки, 404 |
-| `apps/web/src/shared/lib/theme/`, `src/features/theme-switch/` | Две темы: скрипт до отрисовки, `applyTheme`/`useTheme`; переключатель (пока не размещён) |
-| `apps/web/src/shared/` | `api` (serverApi / userServerApi / browserApi), `config` (env на zod, site, security-headers), `ui`, `lib` |
-| `apps/web/public/js/` | Модули героя (vanilla JS): `landing.js`, `cloud-relief.js`, `bust-section.js`, `three.min.js`, `gsap.min.js` |
-| `apps/web/public/assets/` | Картинки, карты облаков, шрифты (`fonts/`), исходники бюста (`credits.json` — лицензии) |
-| `apps/api/src/core/` | Инфраструктура: контракты, доступ, ошибки, БД, Redis, очереди, health, request-id, логи |
-| `apps/api/src/modules/` | Доменные модули (появятся по карте доменов) |
-| `apps/api/drizzle/` | SQL-миграции (генерирует drizzle-kit) |
-| `docker-compose.yml` | Postgres + Redis для разработки |
-| `deploy/` | Прод: Dockerfile'ы в приложениях, `docker-compose.prod.yml`, `Caddyfile`, `.env.example` |
-| `tsconfig.base.json` | Общая строгость TypeScript для всех пакетов |
-| `scripts/build_final_untesis_font.py` | Сборка шрифта Untesis (fonttools, skia-pathops) → `apps/web/public/assets/fonts/` |
-| `scripts/check.sh` | Быстрые проверки одной командой |
+| `docs/architecture.md` | Accepted decisions, data flow, domain map (product → Nest module → contracts → FSD slices) |
+| `packages/contracts/src/core/` | `defineEndpoint` (type-safe contracts), `ApiError`, pagination, primitives (id, dates, text) |
+| `packages/contracts/src/client/` | `createApiClient`: timeout, GET retries with backoff+jitter, response validation, typed errors |
+| `apps/web/app/` | Next routing only: thin re-exports from `src/` |
+| `apps/web/src/_app/` | Root layout, `styles/globals.css` (Tailwind, `@theme`, fonts), base metadata, robots, sitemap |
+| `apps/web/src/_pages/home/` | Landing: `ui/hero.tsx`, `ui/landing-scripts.tsx` (loads the hero modules after hydration), `landing.css` |
+| `apps/web/src/_pages/errors/` | Error, global error and 404 pages |
+| `apps/web/src/shared/lib/theme/`, `src/features/theme-switch/` | Two themes: pre-paint script, `applyTheme`/`useTheme`; switch (not placed yet) |
+| `apps/web/src/shared/` | `api` (serverApi / userServerApi / browserApi), `config` (zod env, site, security-headers), `ui`, `lib` |
+| `apps/web/public/js/` | Hero modules (vanilla JS): `landing.js`, `cloud-relief.js`, `bust-section.js`, `three.min.js`, `gsap.min.js` |
+| `apps/web/public/assets/` | Images, cloud maps, fonts (`fonts/`), bust sources (`credits.json` — licenses) |
+| `apps/api/src/core/` | Infrastructure: contracts, access, errors, DB, Redis, queues, health, request-id, logs |
+| `apps/api/src/modules/` | Domain modules (will appear according to the domain map) |
+| `apps/api/drizzle/` | SQL migrations (generated by drizzle-kit) |
+| `docker-compose.yml` | Postgres + Redis for development |
+| `deploy/` | Production: Dockerfiles in the apps, `docker-compose.prod.yml`, `Caddyfile`, `.env.example` |
+| `tsconfig.base.json` | Shared TypeScript strictness for all packages |
+| `scripts/build_final_untesis_font.py` | Build of the Untesis font (fonttools, skia-pathops) → `apps/web/public/assets/fonts/` |
+| `scripts/check.sh` | Quick checks in one command |
 
-## Правила кода
+## Code rules
 
-Подробные правила — в `.claude/rules/` (Claude Code подгружает их сам, по путям файлов). **Перед кодом — прочитать нужные:**
+Detailed rules are in `.claude/rules/` (Claude Code loads them itself, by file paths). **Read the relevant ones before
+coding:**
 
-| Файл | Где действует | О чём |
+| File | Applies to | Covers |
 |---|---|---|
-| `.claude/rules/general.md` | везде | context7, TypeScript, безопасность (OWASP), устойчивость к отказам, тесты, эффективность |
-| `.claude/rules/contracts.md` | `packages/contracts`, `apps/api/src`, `shared/api` | Как описать ручку контрактом и использовать его на бэке и фронте |
-| `.claude/rules/web.md` | `apps/web/**` | FSD, SSR/SEO, данные через контракты, Tailwind, CSP, Core Web Vitals |
-| `.claude/rules/api.md` | `apps/api/**` | Структура Nest, Drizzle и миграции, доступ, rate limit, очереди, health, тесты |
-| `.claude/rules/hero.md` | `public/js/**`, `_pages/home/**` | WebGL-герой: загрузка после гидрации, Preflight, 60 FPS, фолбэки |
+| `.claude/rules/general.md` | everywhere | Change boundaries, context7, TypeScript, code design and best practices (no duplication, functions, naming), security (OWASP), failure resilience, tests, what the linter checks, self-check |
+| `.claude/rules/contracts.md` | `packages/contracts`, `apps/api/src`, `shared/api` | How to describe an endpoint with a contract and use it on the backend and frontend |
+| `.claude/rules/web.md` | `apps/web/**` | FSD, SSR/SEO, data through contracts, Tailwind, CSP, Core Web Vitals |
+| `.claude/rules/api.md` | `apps/api/**` | Nest structure, Drizzle and migrations, access, rate limit, queues, health, tests |
+| `.claude/rules/hero.md` | `public/js/**`, `_pages/home/**` | WebGL hero: loading after hydration, Preflight, 60 FPS, fallbacks |
 
-Коротко, без чего изменение не принимается:
-- **Не править код, который не касается задачи.** Нужно тронуть что-то за её пределами — сначала спросить владельца.
-- **Доку библиотек — через context7** (`resolve-library-id` → `query-docs` с версией из `yarn.lock`), а не по памяти.
-- Всё, что пересекает HTTP, описано контрактом; типы — из схем, ручных интерфейсов ответа нет.
-- Каждый внешний вход валидируется схемой, доступ проверяется на каждом эндпоинте и объекте, ошибки — fail closed.
-- Каждый исходящий вызов — с таймаутом; ретраи только идемпотентных, с backoff и jitter; долгое — в очередь.
-- Новый код — с тестами в том же изменении, покрытие ≥ 80%, тесты не ослаблять.
-- Новые зависимости, ORM, БД, UI-киты — только по решению владельца.
-- Коммиты: короткое английское сообщение в стиле истории (`feat: …`, `Fix …`), только по просьбе владельца.
+In short, what a change is not accepted without:
+- **Do not edit code unrelated to the task.** If something outside it has to be touched — ask the owner first.
+- **The best practices from `general.md` are mandatory** (no logic duplication, short flat functions, single
+  responsibility, immutability); complexity thresholds and imports are checked by `yarn lint` — rules must not be
+  silenced. Before handing over — the "Self-check before handing over" checklist.
+- **Library docs — through context7** (`resolve-library-id` → `query-docs` with the version from `yarn.lock`), not from
+  memory.
+- Everything that crosses HTTP is described by a contract; types come from the schemas, there are no hand-written
+  response interfaces.
+- Every external input is validated by a schema, access is checked on every endpoint and object, errors fail closed.
+- Every outgoing call has a timeout; retries only for idempotent calls, with backoff and jitter; long work goes to a
+  queue.
+- New code comes with tests in the same change, coverage ≥ 80%, tests must not be weakened.
+- New dependencies, ORMs, DBs, UI kits — only by the owner's decision.
+- Commits: a short English message in the style of the history (`feat: …`, `Fix …`), only at the owner's request.
 
-## Как проверять изменения
+## How to verify changes
 
-1. `bash scripts/check.sh` — синтаксис модулей героя, наличие их файлов, typecheck, lint и тесты всех воркспейсов.
-   Одна команда, агент не нужен. Перед коммитом — ещё `yarn build` и `yarn format:check`;
-   покрытие — `yarn workspace <web|api|@opinions/contracts> test:cov`.
-2. Браузер — один заход: `preview_start` `name: "web"` → ожидание ~15 с (интро: белый экран, потом капли собирают вордмарк)
-   → ошибки консоли → скриншот десктоп + 375px. Без повторных ожиданий.
-   - Сначала `tabs_context`. Если панель скрыта — сразу попросить владельца её открыть (в скрытой панели нет rAF,
-     анимация стоит). Headless Chrome/Edge для WebGL не пробовать — рисует белый кадр.
-   - Если :3000 уже отвечает — `preview_start` с `name: "attach"`, второй сервер не поднимать.
-   - Ошибка консоли `getComputedStyle ... at eff (<anonymous>)` — от инструментов панели, не от страницы.
-   - SEO без браузера: `curl -s localhost:3000/ | grep -E '<title>|<h1|description'` — контент должен быть в HTML.
-3. Визуальное качество (форма капель, плавность, композиция) оценивает основная сессия или владелец — не агенты.
+1. `bash scripts/check.sh` — syntax of the hero modules, presence of their files, typecheck, lint and tests of all
+   workspaces. One command, no agent needed. Before a commit — also `yarn build` and `yarn format:check`;
+   coverage — `yarn workspace <web|api|@untesis/contracts> test:cov`.
+2. Browser — a single pass: `preview_start` `name: "web"` → wait ~15 s (intro: white screen, then the droplets assemble
+   the wordmark) → console errors → screenshot desktop + 375px. No repeated waits.
+   - `tabs_context` first. If the pane is hidden — immediately ask the owner to open it (a hidden pane has no rAF, the
+     animation stands still). Do not try headless Chrome/Edge for WebGL — it renders a white frame.
+   - If :3000 already responds — `preview_start` with `name: "attach"`, do not start a second server.
+   - The console error `getComputedStyle ... at eff (<anonymous>)` comes from the pane's tooling, not from the page.
+   - SEO without a browser: `curl -s localhost:3000/ | grep -E '<title>|<h1|description'` — the content must be in the
+     HTML.
+3. Visual quality (droplet shape, smoothness, composition) is judged by the main session or the owner — not by agents.
 
-## Агенты проекта (`.claude/agents/`)
+## Project agents (`.claude/agents/`)
 
-Основная сессия — постановщик задач и ревьюер: решает, проектирует, пишет шейдерную математику, ставит ТЗ,
-сама смотрит дифф и делает финальный взгляд. Объём механики отдаёт агентам.
+The main session is the task setter and reviewer: it decides, designs, writes the shader math, writes the task briefs,
+looks at the diff itself and takes the final look. It hands the bulk of mechanical work to agents.
 
-| Агент | Модель | Когда звать |
+| Agent | Model | When to call |
 |---|---|---|
-| `coder` | Sonnet | Код по готовому ТЗ: вёрстка, правка модуля, перенос параметров, рефакторинг |
-| `scout` | Haiku | Найти, где что лежит в коде; найти неиспользуемые файлы/ссылки; прочитать доку (three.js, GSAP, WebGL) |
-| `verifier` | Haiku | Браузерная проверка по пункту 2 выше, когда её много (несколько страниц/размеров) |
+| `coder` | Sonnet | Code from a ready task brief: markup, editing a module, moving parameters, refactoring |
+| `scout` | Haiku | Find where things are in the code; find unused files/links; read docs (three.js, GSAP, WebGL) |
+| `verifier` | Haiku | Browser check per item 2 above, when there is a lot of it (several pages/sizes) |
 
-Цикл: решение (сессия) → `coder` → `scripts/check.sh` → ревью диффа сессией → браузер → коммит по просьбе.
+Cycle: decision (main session) → `coder` → `scripts/check.sh` → diff review by the main session → browser → commit on
+request.
 
-## Экономия лимита
+## Saving the usage budget
 
-- Ревью — сама сессия, точечно: `git diff --stat`, затем рискованные куски (шейдеры, uniform-ы, жизненный цикл).
-  Отдельного ревью-агента нет.
-- Перед большим рефактором — предложить коммит-чекпоинт, чтобы база для `git diff` была чистой (не бэкап в scratchpad).
-- На «улучши всё» — сначала назвать объём и цену: «безопасный минимум» или «полный проход».
-- ТЗ на аудит: «оглавление через grep + точечное чтение», не «прочитай целиком». Поиск мусора и ссылок — `scout`, не Sonnet.
-- Отчёты агентов — до 500 слов.
-- ТЗ агенту самодостаточное: цель, файлы, ограничения, критерий готовности, формат отчёта — агент не видит разговор.
+- Review is done by the main session itself, selectively: `git diff --stat`, then the risky parts (shaders, uniforms,
+  lifecycle). There is no separate review agent.
+- Before a big refactor — suggest a commit checkpoint so that the base for `git diff` is clean (not a backup in the
+  scratchpad).
+- For "improve everything" — first state the scope and cost: a "safe minimum" or a "full pass".
+- Task brief for an audit: "table of contents via grep + selective reading", not "read it all". Searching for junk and
+  links — `scout`, not Sonnet.
+- Agent reports — up to 500 words.
+- A task brief for an agent is self-contained: goal, files, constraints, done criterion, report format — the agent does
+  not see the conversation.
 
 ## code-review-graph
 
-В проекте есть граф кода (`.code-review-graph/`, MCP `mcp__code-review-graph__*`, грузится через ToolSearch `+code-review-graph`).
-Для поиска по коду сначала граф (`semantic_search_nodes_tool`, `query_graph_tool`), Grep/Read — если граф не покрывает.
-Если граф пустой — `build_or_update_graph_tool`.
+The project has a code graph (`.code-review-graph/`, MCP `mcp__code-review-graph__*`, loaded via ToolSearch
+`+code-review-graph`). For code search use the graph first (`semantic_search_nodes_tool`, `query_graph_tool`),
+Grep/Read — if the graph does not cover it. If the graph is empty — `build_or_update_graph_tool`.

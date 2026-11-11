@@ -1,5 +1,5 @@
 {
-  "name": "opinions",
+  "name": "untesis",
   "private": true,
   "packageManager": "yarn@4.18.1",
   "engines": {
@@ -10,14 +10,14 @@
     "apps/*"
   ],
   "scripts": {
-    "postinstall": "yarn workspace @opinions/contracts build",
-    "dev": "yarn workspaces foreach -piA --exclude opinions run dev",
+    "postinstall": "yarn workspace @untesis/contracts build",
+    "dev": "yarn workspaces foreach -piA --exclude untesis run dev",
     "dev:web": "yarn workspace web dev",
     "dev:api": "yarn workspace api dev",
-    "build": "yarn workspaces foreach -tA --exclude opinions run build",
-    "typecheck": "yarn workspaces foreach -A --exclude opinions run typecheck",
-    "lint": "yarn workspaces foreach -A --exclude opinions run lint",
-    "test": "yarn workspaces foreach -A --exclude opinions run test",
+    "build": "yarn workspaces foreach -tA --exclude untesis run build",
+    "typecheck": "yarn workspaces foreach -A --exclude untesis run typecheck",
+    "lint": "yarn workspaces foreach -A --exclude untesis run lint",
+    "test": "yarn workspaces foreach -A --exclude untesis run test",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

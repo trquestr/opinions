@@ -40,30 +40,21 @@ export const apiErrorSchema = z.object({
 });
 export type ApiError = z.output<typeof apiErrorSchema>;
 
+/** Коды для статусов, у которых есть точное соответствие; остальные — по классу статуса. */
+const ERROR_CODE_BY_STATUS: Readonly<Partial<Record<number, ApiErrorCode>>> = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHORIZED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
+  422: 'VALIDATION_FAILED',
+  429: 'RATE_LIMITED',
+  503: 'SERVICE_UNAVAILABLE',
+};
+
 /** Код ошибки по HTTP-статусу — для фильтра исключений, когда код не задан явно. */
 export function apiErrorCodeForStatus(statusCode: number): ApiErrorCode {
-  switch (statusCode) {
-    case 400:
-      return 'BAD_REQUEST';
-    case 401:
-      return 'UNAUTHORIZED';
-    case 403:
-      return 'FORBIDDEN';
-    case 404:
-      return 'NOT_FOUND';
-    case 409:
-      return 'CONFLICT';
-    case 413:
-      return 'PAYLOAD_TOO_LARGE';
-    case 415:
-      return 'UNSUPPORTED_MEDIA_TYPE';
-    case 422:
-      return 'VALIDATION_FAILED';
-    case 429:
-      return 'RATE_LIMITED';
-    case 503:
-      return 'SERVICE_UNAVAILABLE';
-    default:
-      return statusCode >= 500 ? 'INTERNAL' : 'BAD_REQUEST';
-  }
+  return ERROR_CODE_BY_STATUS[statusCode] ?? (statusCode >= 500 ? 'INTERNAL' : 'BAD_REQUEST');
 }

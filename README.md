@@ -1,39 +1,39 @@
-# «Мнения»
+# Untesis
 
-Личная библиотека мнений: каждый день — один вопрос, короткий ответ, со временем — история того, как менялись
-взгляды. Концепция — [`Идеи.md`](Идеи.md), архитектура и карта доменов — [`docs/architecture.md`](docs/architecture.md).
+A personal library of opinions: every day — one question, a short answer, and over time — a history of how views have
+changed. Concept — [`Идеи.md`](Идеи.md), architecture and domain map — [`docs/architecture.md`](docs/architecture.md).
 
-Сейчас готовы промо-лендинг с WebGL-героем (вордмарк **UNTESIS** из чернильных капель, облака, точечный бюст)
-и инфраструктура под домены продукта.
+Currently ready: the promo landing with the WebGL hero (the **UNTESIS** wordmark made of ink droplets, clouds, a dotted
+bust) and the infrastructure for the product's domains.
 
-## Состав
+## Contents
 
-| Пакет | Что это |
+| Package | What it is |
 |---|---|
-| `packages/contracts` | `@opinions/contracts` — zod-контракты API и типизированный клиент, общие для фронта и бэка |
-| `apps/web` | Next.js 16 (SSR для SEO), Feature-Sliced Design, Tailwind CSS 4 |
+| `packages/contracts` | `@untesis/contracts` — zod API contracts and a typed client, shared by the frontend and the backend |
+| `apps/web` | Next.js 16 (SSR for SEO), Feature-Sliced Design, Tailwind CSS 4 |
 | `apps/api` | NestJS 12, Drizzle ORM + PostgreSQL 18, Redis 8 + BullMQ |
-| `deploy/` | Прод на VPS: Docker Compose, Caddy (HTTPS), миграции отдельным контейнером |
+| `deploy/` | Production on a VPS: Docker Compose, Caddy (HTTPS), migrations in a separate container |
 
-## Запуск
+## Running
 
-Нужны Node 26 LTS (`.nvmrc`), Yarn 4 через corepack (`npm i -g corepack && corepack enable`) и Docker.
+Requires Node 26 LTS (`.nvmrc`), Yarn 4 via corepack (`npm i -g corepack && corepack enable`) and Docker.
 
 ```bash
 yarn install
 docker compose up -d --wait
 cp apps/api/.env.example apps/api/.env
-yarn dev          # контракты (watch) + api :4000 + web :3000
+yarn dev          # contracts (watch) + api :4000 + web :3000
 ```
 
-Проверки: `yarn typecheck`, `yarn lint`, `yarn test`, `yarn build`, `yarn format:check`; всё сразу — `bash scripts/check.sh`.
-Интеграционные тесты бэка (нужен docker compose): `yarn workspace api test:int`.
+Checks: `yarn typecheck`, `yarn lint`, `yarn test`, `yarn build`, `yarn format:check`; everything at once —
+`bash scripts/check.sh`. Backend integration tests (need docker compose): `yarn workspace api test:int`.
 
-## Правила кода
+## Code rules
 
-`.claude/rules/`: общие (безопасность, отказоустойчивость, тесты, эффективность), контракты, фронт, бэк, WebGL-герой.
+`.claude/rules/`: general (security, fault tolerance, tests, efficiency), contracts, frontend, backend, WebGL hero.
 
-## Технологии героя
+## Hero technologies
 
-WebGL2 (GLSL), three.js и GSAP 3.12.5 (локально, без CDN), свой шрифт Untesis
-(`apps/web/public/assets/fonts/`, сборка — `scripts/build_final_untesis_font.py`).
+WebGL2 (GLSL), three.js and GSAP 3.12.5 (local, no CDN), the custom Untesis font
+(`apps/web/public/assets/fonts/`, built by `scripts/build_final_untesis_font.py`).

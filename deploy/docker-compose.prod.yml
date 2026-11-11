@@ -1,7 +1,7 @@
 # Прод на своём VPS. Запуск из корня репозитория:
 #   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
 # Наружу торчит только caddy (80/443). Postgres и Redis доступны лишь внутри сети backend.
-name: opinions-prod
+name: untesis-prod
 
 x-logging: &default-logging
   driver: json-file
@@ -32,7 +32,7 @@ services:
     logging: *default-logging
 
   web:
-    image: ${REGISTRY:-opinions}/web:${TAG:-latest}
+    image: ${REGISTRY:-untesis}/web:${TAG:-latest}
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
@@ -51,7 +51,7 @@ services:
     logging: *default-logging
 
   api:
-    image: ${REGISTRY:-opinions}/api:${TAG:-latest}
+    image: ${REGISTRY:-untesis}/api:${TAG:-latest}
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -77,7 +77,7 @@ services:
 
   # Одноразовые миграции перед стартом api (тот же образ).
   migrate:
-    image: ${REGISTRY:-opinions}/api:${TAG:-latest}
+    image: ${REGISTRY:-untesis}/api:${TAG:-latest}
     command: ['node', 'dist/migrate.js']
     restart: 'no'
     environment:

@@ -8,7 +8,7 @@ import {
   type NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { EndpointConfig } from '@opinions/contracts';
+import type { EndpointConfig } from '@untesis/contracts';
 import type { Request } from 'express';
 import { map, type Observable } from 'rxjs';
 import { ENDPOINT_CONTRACT } from './endpoint.decorator.js';

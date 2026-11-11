@@ -2,7 +2,7 @@ import { Controller } from '@nestjs/common';
 import { getDrizzleToken } from '@nestjs/drizzle';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { apiErrorSchema, defineEndpoint } from '@opinions/contracts';
+import { apiErrorSchema, defineEndpoint } from '@untesis/contracts';
 import request from 'supertest';
 import { z } from 'zod';
 import { ContractBody } from '../src/core/contracts/contract-params.js';

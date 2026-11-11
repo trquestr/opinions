@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { toUrlValue } from './url.js';
 
 /**
  * Контракт эндпоинта — единственный источник правды о форме HTTP-ручки.
@@ -123,10 +124,10 @@ export function successStatus(endpoint: EndpointConfig): SuccessStatus {
  */
 export function buildPath(path: EndpointPath, params?: Readonly<Record<string, unknown>>): string {
   return path.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
-    const value = params?.[name];
-    if (value === undefined || value === null || value === '') {
-      throw new Error(`Не задан параметр пути "${name}" для ${path}`);
+    const value = toUrlValue(params?.[name]);
+    if (value === undefined) {
+      throw new Error(`Параметр пути "${name}" для ${path} не задан или не скаляр`);
     }
-    return encodeURIComponent(String(value));
+    return encodeURIComponent(value);
   });
 }

@@ -1,4 +1,4 @@
-import { createApiClient } from '@opinions/contracts/client';
+import { createApiClient } from '@untesis/contracts/client';
 
 /**
  * Клиент для браузера: baseUrl '' — запросы идут на тот же origin (`/api/...`).

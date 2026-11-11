@@ -6,7 +6,7 @@ export const DEFAULT_THEME: Theme = 'light';
 export const THEME_STORAGE_KEY = 'theme';
 
 // Событие для подписчиков в этой же вкладке: `storage` срабатывает только в ДРУГИХ вкладках.
-export const THEME_CHANGE_EVENT = 'opinions:theme-change';
+export const THEME_CHANGE_EVENT = 'untesis:theme-change';
 
 /**
  * Самодостаточный скрипт для <head>: выполняется до отрисовки и ставит тёмную тему из localStorage,

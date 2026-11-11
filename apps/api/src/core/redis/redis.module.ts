@@ -2,7 +2,7 @@ import { Global, Inject, Injectable, Module, type OnApplicationShutdown } from '
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 
-export const REDIS = Symbol.for('opinions.redis');
+export const REDIS = Symbol.for('untesis.redis');
 
 /** Закрывает соединение при остановке: `quit()` дожидается ответов на уже отправленные команды. */
 @Injectable()

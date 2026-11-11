@@ -34,6 +34,13 @@ const deleteItem = defineEndpoint({
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+/** Первый вызов fetch; если его не было — тест падает с понятной ошибкой, а не на undefined. */
+function firstCall(fetchMock: { mock: { calls: Parameters<typeof fetch>[] } }): Parameters<typeof fetch> {
+  const call = fetchMock.mock.calls[0];
+  if (!call) throw new Error('fetch не вызывался');
+  return call;
+}
+
 function setup(responses: (Response | Error)[]) {
   const fetchMock = vi.fn<typeof fetch>(async () => {
     const next = responses.shift();
@@ -60,7 +67,7 @@ describe('createApiClient', () => {
       query: { tags: ['x', 'y'], page: 2 },
     });
     expect(result).toEqual({ id: 'a b' });
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = firstCall(fetchMock);
     expect(url).toBe('http://api:4000/api/items/a%20b?tags=x&tags=y&page=2');
     expect(init?.method).toBe('GET');
     const headers = new Headers(init?.headers);
@@ -77,11 +84,24 @@ describe('createApiClient', () => {
       client.call(createItem, { body: { name: 'x' } }, { headers: { 'x-request-id': 'r1' } }),
     ).rejects.toThrow(ApiRequestError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const init = fetchMock.mock.calls[0]![1];
+    const [, init] = firstCall(fetchMock);
     expect(init?.body).toBe(JSON.stringify({ name: 'x' }));
     const headers = new Headers(init?.headers);
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('x-request-id')).toBe('r1');
+  });
+
+  it('объект в query отклоняется до отправки, а не уходит как [object Object]', async () => {
+    const filter = defineEndpoint({
+      method: 'GET',
+      path: '/items',
+      access: 'public',
+      query: z.object({ filter: z.unknown() }),
+      response: z.object({}),
+    });
+    const { client, fetchMock } = setup([]);
+    await expect(client.call(filter, { query: { filter: { a: 1 } } })).rejects.toThrow(/filter/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('проверяет вход до отправки', async () => {

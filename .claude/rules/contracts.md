@@ -5,40 +5,40 @@ paths:
   - "apps/web/src/shared/api/**"
 ---
 
-# Контракты API (`packages/contracts`, `@opinions/contracts`)
+# API contracts (`packages/contracts`, `@untesis/contracts`)
 
-Контракт — единственный источник правды о ручке: метод, путь, доступ, схемы params/query/body/ответа.
-Бэк и фронт используют один и тот же объект; типы выводятся из zod-схем, вручную интерфейсы ответа не пишутся.
+A contract is the single source of truth about an endpoint: method, path, access, schemas of params/query/body/response.
+Back and front use the same object; types are derived from zod schemas, response interfaces are not written by hand.
 
-## Как добавить ручку
+## How to add an endpoint
 
-1. Схемы домена — `packages/contracts/src/<домен>/schemas.ts` из примитивов `core/primitives.ts`
-   (`idSchema`, `isoDateTimeSchema`, `userText({ max })`), списки — `cursorPageQuerySchema` / `cursorPageSchema(item)`.
-2. Контракт — `packages/contracts/src/<домен>/endpoints.ts`:
+1. Domain schemas — `packages/contracts/src/<domain>/schemas.ts` built from the primitives in `core/primitives.ts`
+   (`idSchema`, `isoDateTimeSchema`, `userText({ max })`), lists — `cursorPageQuerySchema` / `cursorPageSchema(item)`.
+2. Contract — `packages/contracts/src/<domain>/endpoints.ts`:
    ```ts
    export const getOpinionContract = defineEndpoint({
      method: 'GET',
      path: '/opinions/:opinionId',
-     access: 'public',          // 'public' | 'user' — обязателен, проверяется глобальным guard'ом
+     access: 'public',          // 'public' | 'user' — required, checked by the global guard
      params: z.object({ opinionId: idSchema }),
      response: opinionSchema,
    });
    ```
-   `defineEndpoint` не скомпилирует: params, не совпавшие с `:name` в пути; тело у GET/DELETE; контракт без `access`.
-3. Экспорт — через `src/<домен>/index.ts` и корневой `src/index.ts`. Тест схем рядом (`*.test.ts`), для типов — `expectTypeOf`.
-4. `yarn workspace @opinions/contracts build` (или `yarn dev` — там watch).
-5. Бэк: `@Endpoint(contract)` на методе контроллера + `@ContractParams/@ContractQuery/@ContractBody(contract)` на аргументах,
-   типы аргументов — `ParamsOutput<typeof c>` / `QueryOutput` / `BodyOutput`, возврат — `Promise<ResponseInput<typeof c>>`.
-6. Фронт: `serverApi.call(contract, { params })` / `browserApi.call(...)` — результат уже `ResponseOutput<typeof c>`.
+   `defineEndpoint` will not compile: params that do not match `:name` in the path; a body on GET/DELETE; a contract without `access`.
+3. Export — via `src/<domain>/index.ts` and the root `src/index.ts`. A schema test next to it (`*.test.ts`), for types — `expectTypeOf`.
+4. `yarn workspace @untesis/contracts build` (or `yarn dev` — it has watch).
+5. Back: `@Endpoint(contract)` on the controller method + `@ContractParams/@ContractQuery/@ContractBody(contract)` on the arguments,
+   argument types — `ParamsOutput<typeof c>` / `QueryOutput` / `BodyOutput`, return — `Promise<ResponseInput<typeof c>>`.
+6. Front: `serverApi.call(contract, { params })` / `browserApi.call(...)` — the result is already `ResponseOutput<typeof c>`.
 
-## Правила
+## Rules
 
-- В пакете — только схемы, типы и чистые функции. Никакого доступа к БД, env, DOM, Nest, Next.
-- Схемы запроса без преобразований, меняющих тип (строка → Date и т.п.): клиент проверяет вход до отправки,
-  сервер — повторно. Преобразования (`.transform`) — только в схемах ответа.
-- Ответ — DTO под экран/сценарий, а не строка таблицы. Приватные поля (email, флаги модерации) в публичные
-  схемы не попадают: ответ режется схемой, лишнего не уйдёт.
-- Совместимость: новое поле ответа — можно; новое обязательное поле запроса, удаление/переименование поля — только
-  новой версией ручки (`/v2/...`) и миграцией клиентов в том же изменении.
-- Ошибки — только общий `apiErrorSchema`; машинный код из `apiErrorCodeSchema` (расширять добавлением).
-- Лимиты пишутся в схеме (длина текста, размер массивов, `limit` страницы ≤ 50) — это и есть защита от больших тел.
+- The package contains only schemas, types and pure functions. No access to the DB, env, DOM, Nest, Next.
+- Request schemas have no type-changing transformations (string → Date etc.): the client validates input before sending,
+  the server validates again. Transformations (`.transform`) — only in response schemas.
+- A response is a DTO for a screen/scenario, not a table row. Private fields (email, moderation flags) do not get into
+  public schemas: the response is cut by the schema, nothing extra will leak.
+- Compatibility: a new response field is allowed; a new required request field, or removing/renaming a field — only
+  as a new endpoint version (`/v2/...`) and with client migration in the same change.
+- Errors — only the common `apiErrorSchema`; machine code from `apiErrorCodeSchema` (extend by adding).
+- Limits are written in the schema (text length, array sizes, page `limit` ≤ 50) — this is the protection against large bodies.

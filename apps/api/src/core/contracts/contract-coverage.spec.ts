@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { MetadataScanner, type DiscoveryService } from '@nestjs/core';
-import { defineEndpoint } from '@opinions/contracts';
+import { defineEndpoint } from '@untesis/contracts';
 import { z } from 'zod';
 import { ContractCoverage } from './contract-coverage.js';
 import { Endpoint } from './endpoint.decorator.js';

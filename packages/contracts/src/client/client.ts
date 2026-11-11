@@ -7,6 +7,7 @@ import {
   type EndpointRequest,
   type ResponseOutput,
 } from '../core/endpoint.js';
+import { toUrlValue } from '../core/url.js';
 import { ApiContractError, ApiNetworkError, ApiRequestError } from './errors.js';
 
 /**
@@ -63,76 +64,132 @@ const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Настройки клиента после подстановки значений по умолчанию. */
+interface ClientSettings {
+  readonly baseUrl: string;
+  readonly fetch: typeof fetch;
+  readonly timeoutMs: number;
+  readonly retry: RetryPolicy;
+  readonly headers: ApiClientOptions['headers'];
+  readonly random: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
+}
+
+/** Запрос, готовый к отправке: всё, что не меняется между попытками. */
+interface PreparedRequest {
+  readonly label: string;
+  readonly url: string;
+  readonly init: RequestInit;
+  readonly maxRetries: number;
+}
+
+/** Итог одной попытки. Ошибка вызывающего (отмена) сюда не попадает — она пробрасывается сразу. */
+type AttemptOutcome =
+  | { readonly kind: 'success'; readonly response: Response }
+  | { readonly kind: 'http-error'; readonly response: Response; readonly retryable: boolean }
+  | { readonly kind: 'network-error'; readonly error: ApiNetworkError; readonly retryable: true };
+
+/** Сырые части запроса: типы конкретного эндпоинта проверены в сигнатуре `call`. */
+interface RequestParts {
+  readonly params?: Readonly<Record<string, unknown>>;
+  readonly query?: Readonly<Record<string, unknown>>;
+  readonly body?: unknown;
+}
+
 export function createApiClient(options: ApiClientOptions): ApiClient {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
-  const retry: RetryPolicy = { ...DEFAULT_RETRY, ...options.retry };
-  const random = options.random ?? Math.random;
-  const sleep = options.sleep ?? defaultSleep;
+  const settings: ClientSettings = {
+    baseUrl: options.baseUrl,
+    fetch: options.fetch ?? globalThis.fetch,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    retry: { ...DEFAULT_RETRY, ...options.retry },
+    headers: options.headers,
+    random: options.random ?? Math.random,
+    sleep: options.sleep ?? defaultSleep,
+  };
 
   async function call<TEndpoint extends EndpointConfig>(
     endpoint: TEndpoint,
     request: EndpointRequest<TEndpoint>,
     callOptions: CallOptions = {},
   ): Promise<ResponseOutput<TEndpoint>> {
-    const label = `${endpoint.method} ${endpoint.path}`;
-    const req = request as {
-      params?: Record<string, unknown>;
-      query?: Record<string, unknown>;
-      body?: unknown;
-    };
-
-    // Вход проверяем до отправки: ошибка программиста видна сразу, а не как 400 от сервера.
-    // Отправляем исходные данные (z.input) — сервер сам применит схему.
-    assertValid(endpoint.params, req.params, `${label}: params`);
-    // Не переданный query сервер видит как `{}` — так и проверяем.
-    assertValid(endpoint.query, req.query ?? {}, `${label}: query`);
-    assertValid(endpoint.body, req.body, `${label}: body`);
-
-    const url = buildUrl(options.baseUrl, endpoint, req.params, req.query);
-    const headers = new Headers(await options.headers?.());
-    new Headers(callOptions.headers).forEach((value, key) => headers.set(key, value));
-    headers.set('accept', 'application/json');
-    const hasBody = endpoint.body !== undefined;
-    if (hasBody) headers.set('content-type', 'application/json');
-
-    const maxRetries = endpoint.method === 'GET' ? retry.retries : 0;
-
+    const prepared = await prepareRequest({
+      endpoint,
+      parts: request as RequestParts,
+      callOptions,
+      settings,
+    });
     for (let attempt = 0; ; attempt += 1) {
-      const timeout = AbortSignal.timeout(callOptions.timeoutMs ?? options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-      const signal = callOptions.signal ? AbortSignal.any([callOptions.signal, timeout]) : timeout;
-
-      let response: Response;
-      try {
-        response = await fetchImpl(url, {
-          ...callOptions.init,
-          method: endpoint.method,
-          headers,
-          body: hasBody ? JSON.stringify(req.body) : undefined,
-          signal,
-        });
-      } catch (cause) {
-        // Отмена вызывающим — не сбой сети: не ретраим и пробрасываем как есть.
-        if (callOptions.signal?.aborted) throw cause;
-        const error = new ApiNetworkError(label, timeout.aborted, { cause });
-        if (attempt < maxRetries) {
-          await sleep(backoffDelay(retry, attempt, random));
-          continue;
-        }
-        throw error;
-      }
-
-      if (response.ok) return parseSuccess(endpoint, response, label);
-
-      if (attempt < maxRetries && RETRYABLE_STATUSES.has(response.status)) {
-        await response.body?.cancel();
-        await sleep(backoffDelay(retry, attempt, random));
-        continue;
-      }
-      throw new ApiRequestError(response.status, await parseError(response));
+      const outcome = await attemptOnce(prepared, callOptions, settings);
+      if (outcome.kind === 'success') return parseSuccess(endpoint, outcome.response, prepared.label);
+      if (attempt >= prepared.maxRetries || !outcome.retryable) throw await toError(outcome);
+      if (outcome.kind === 'http-error') await outcome.response.body?.cancel();
+      await settings.sleep(backoffDelay(settings.retry, attempt, settings.random));
     }
   }
 
   return { call };
+}
+
+/**
+ * Проверяет вход до отправки (ошибка программиста видна сразу, а не как 400 от сервера) и собирает
+ * URL, заголовки и тело. Отправляются исходные данные (z.input) — сервер сам применит схему.
+ */
+async function prepareRequest(args: {
+  readonly endpoint: EndpointConfig;
+  readonly parts: RequestParts;
+  readonly callOptions: CallOptions;
+  readonly settings: ClientSettings;
+}): Promise<PreparedRequest> {
+  const { endpoint, parts, callOptions, settings } = args;
+  const label = `${endpoint.method} ${endpoint.path}`;
+  assertValid(endpoint.params, parts.params, `${label}: params`);
+  // Не переданный query сервер видит как `{}` — так и проверяем.
+  assertValid(endpoint.query, parts.query ?? {}, `${label}: query`);
+  assertValid(endpoint.body, parts.body, `${label}: body`);
+
+  const headers = new Headers(await settings.headers?.());
+  new Headers(callOptions.headers).forEach((value, key) => headers.set(key, value));
+  headers.set('accept', 'application/json');
+  const hasBody = endpoint.body !== undefined;
+  if (hasBody) headers.set('content-type', 'application/json');
+
+  const path = `${settings.baseUrl.replace(/\/+$/, '')}${API_PREFIX}${buildPath(endpoint.path, parts.params)}`;
+  return {
+    label,
+    url: withQuery(path, parts.query),
+    init: {
+      ...callOptions.init,
+      method: endpoint.method,
+      headers,
+      body: hasBody ? JSON.stringify(parts.body) : undefined,
+    },
+    // Повторяем только идемпотентный GET.
+    maxRetries: endpoint.method === 'GET' ? settings.retry.retries : 0,
+  };
+}
+
+/** Одна попытка с собственным таймаутом; отмена вызывающим — не сбой сети, её пробрасываем как есть. */
+async function attemptOnce(
+  prepared: PreparedRequest,
+  callOptions: CallOptions,
+  settings: ClientSettings,
+): Promise<AttemptOutcome> {
+  const timeout = AbortSignal.timeout(callOptions.timeoutMs ?? settings.timeoutMs);
+  const signal = callOptions.signal ? AbortSignal.any([callOptions.signal, timeout]) : timeout;
+  try {
+    const response = await settings.fetch(prepared.url, { ...prepared.init, signal });
+    if (response.ok) return { kind: 'success', response };
+    return { kind: 'http-error', response, retryable: RETRYABLE_STATUSES.has(response.status) };
+  } catch (cause) {
+    if (callOptions.signal?.aborted) throw cause;
+    const error = new ApiNetworkError(prepared.label, timeout.aborted, { cause });
+    return { kind: 'network-error', error, retryable: true };
+  }
+}
+
+async function toError(outcome: Exclude<AttemptOutcome, { kind: 'success' }>): Promise<Error> {
+  if (outcome.kind === 'network-error') return outcome.error;
+  return new ApiRequestError(outcome.response.status, await parseError(outcome.response));
 }
 
 /** Full jitter: равномерно в [0, min(max, base·2^attempt)] — разносит повторы разных клиентов. */
@@ -149,21 +206,31 @@ function assertValid(schema: EndpointConfig['body'], value: unknown, label: stri
   }
 }
 
-function buildUrl(
-  baseUrl: string,
-  endpoint: EndpointConfig,
-  params: Record<string, unknown> | undefined,
-  query: Record<string, unknown> | undefined,
-): string {
-  const path = `${baseUrl.replace(/\/+$/, '')}${API_PREFIX}${buildPath(endpoint.path, params)}`;
+/**
+ * Дописывает query-строку. `undefined`/`null`/пустые значения пропускаются, массив — повтором ключа
+ * (`tags=a&tags=b`). Не скаляр (объект) — ошибка: в URL он стал бы `[object Object]`.
+ */
+function withQuery(path: string, query: Readonly<Record<string, unknown>> | undefined): string {
   if (!query) return path;
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null) continue;
-    for (const item of Array.isArray(value) ? value : [value]) search.append(key, String(item));
+    const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+    for (const item of items) appendQueryValue({ search, key, value: item });
   }
   const qs = search.toString();
   return qs ? `${path}?${qs}` : path;
+}
+
+function appendQueryValue(args: {
+  readonly search: URLSearchParams;
+  readonly key: string;
+  readonly value: unknown;
+}): void {
+  const { search, key, value } = args;
+  if (value === undefined || value === null || value === '') return;
+  const text = toUrlValue(value);
+  if (text === undefined) throw new TypeError(`Параметр query "${key}" не скаляр`);
+  search.append(key, text);
 }
 
 async function parseSuccess<TEndpoint extends EndpointConfig>(

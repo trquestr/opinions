@@ -110,5 +110,8 @@ describe('buildPath', () => {
     expect(() => buildPath('/q/:id')).toThrow('id');
     expect(() => buildPath('/q/:id', { id: '' })).toThrow('id');
     expect(() => buildPath('/q/:id', { id: null })).toThrow('id');
+    // Объект не превращается в [object Object] в URL.
+    expect(() => buildPath('/q/:id', { id: { nested: 1 } })).toThrow('id');
+    expect(buildPath('/q/:flag', { flag: true })).toBe('/q/true');
   });
 });

@@ -1,6 +1,6 @@
 import { Controller, Header, Inject } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
-import { healthContract, readinessContract, type ResponseInput } from '@opinions/contracts';
+import { healthContract, readinessContract, type ResponseInput } from '@untesis/contracts';
 import { Endpoint } from '../contracts/endpoint.decorator.js';
 import { ReadinessService } from './readiness.service.js';
 

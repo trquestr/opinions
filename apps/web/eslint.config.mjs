@@ -16,7 +16,30 @@ const eslintConfig = defineConfig([
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/consistent-type-imports': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
+  },
+  {
+    // Лучшие практики из .claude/rules/general.md, раздел «Автоматическая проверка» (те же пороги, что в oxlint).
+    files: ['**/*.{ts,tsx,mts,mjs}'],
+    rules: {
+      complexity: ['error', { max: 10 }],
+      'max-depth': ['error', { max: 3 }],
+      'max-params': ['error', { max: 3 }],
+      'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
+      'no-nested-ternary': 'error',
+      'no-else-return': 'error',
+      'no-param-reassign': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error',
+      'import/no-cycle': 'error',
+      'import/no-duplicates': 'error',
+    },
+  },
+  {
+    // describe-блоки тестов длинные по природе.
+    files: ['**/*.test.{ts,tsx}'],
+    rules: { 'max-lines-per-function': 'off' },
   },
   globalIgnores([
     '.next/**',
