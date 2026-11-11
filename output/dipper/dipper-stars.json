@@ -1,0 +1,60 @@
+{
+  "_source": "English Wikipedia star infoboxes, fetched 2026-11-11; astrometry cited there to van Leeuwen 2007 (Hipparcos new reduction), radial velocities from mixed catalogues. Not read from SIMBAD directly.",
+  "_units": "ra_deg/dec_deg J2000 degrees; pm_* mas/yr (pm_ra includes cos dec); plx mas; rv km/s",
+  "Dubhe": {
+    "ra_deg": 165.93196,
+    "dec_deg": 61.75103,
+    "pm_ra_mas": -134.11,
+    "pm_dec_mas": -34.7,
+    "plx_mas": 26.54,
+    "rv_km_s": -9.4
+  },
+  "Merak": {
+    "ra_deg": 165.46033,
+    "dec_deg": 56.38242,
+    "pm_ra_mas": 81.43,
+    "pm_dec_mas": 33.49,
+    "plx_mas": 40.9,
+    "rv_km_s": -12.0
+  },
+  "Phecda": {
+    "ra_deg": 178.45771,
+    "dec_deg": 53.69475,
+    "pm_ra_mas": 107.68,
+    "pm_dec_mas": 11.01,
+    "plx_mas": 39.21,
+    "rv_km_s": -12.6
+  },
+  "Megrez": {
+    "ra_deg": 183.8565,
+    "dec_deg": 57.03261,
+    "pm_ra_mas": 104.11,
+    "pm_dec_mas": 7.3,
+    "plx_mas": 40.51,
+    "rv_km_s": -20.2
+  },
+  "Alioth": {
+    "ra_deg": 193.50729,
+    "dec_deg": 55.95983,
+    "pm_ra_mas": 111.91,
+    "pm_dec_mas": -8.24,
+    "plx_mas": 39.51,
+    "rv_km_s": -9.3
+  },
+  "Mizar": {
+    "ra_deg": 200.98142,
+    "dec_deg": 54.92536,
+    "pm_ra_mas": 119.01,
+    "pm_dec_mas": -25.97,
+    "plx_mas": 39.36,
+    "rv_km_s": -6.31
+  },
+  "Alkaid": {
+    "ra_deg": 206.88517,
+    "dec_deg": 49.31328,
+    "pm_ra_mas": -121.17,
+    "pm_dec_mas": -14.91,
+    "plx_mas": 31.38,
+    "rv_km_s": -10.9
+  }
+}
