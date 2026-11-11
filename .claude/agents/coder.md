@@ -15,7 +15,7 @@ Mandatory:
 - Monorepo: `packages/contracts` (zod contracts), `apps/web` (Next 16, SSR, FSD, Tailwind, two themes) and `apps/api` (Nest 12, Drizzle, Postgres, Redis). The hero modules in `apps/web/public/js/` are loaded only by `apps/web/src/_pages/home/ui/landing-scripts.tsx`.
 - In the `requestAnimationFrame` loop do not create objects or arrays, do not change uniforms without need.
   Preserve the handling of `prefers-reduced-motion`, WebGL context loss and the fallbacks.
-- Heavy files (`three.min.js`, `bust-section.js`, `apps/web/public/js/`) are not read in full — grep and chunks.
+- Heavy files (`three.min.js`, `gsap.min.js`, `apps/web/public/js/`) are not read in full — grep and chunks.
 - If the brief requires a decision that is not in it (how it should look, which curve, which parameter to choose,
   a new library) — do not choose yourself, return a question with 2–3 options.
 - New code comes with tests in the same change (coverage ≥ 80%); do not weaken tests (`skip`, `only`, a loosened `expect`).

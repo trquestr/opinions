@@ -10,13 +10,7 @@ import { useEffect } from 'react';
  *
  * Разметка при этом целиком рендерится на сервере (hero.tsx) — для SEO.
  */
-export const SCRIPTS = [
-  '/js/three.min.js',
-  '/js/cloud-relief.js',
-  '/js/gsap.min.js',
-  '/js/landing.js',
-  '/js/bust-section.js',
-];
+export const SCRIPTS = ['/js/three.min.js', '/js/cloud-relief.js', '/js/gsap.min.js', '/js/landing.js'];
 
 declare global {
   interface Window {

@@ -6,7 +6,7 @@ paths:
 
 # WebGL landing hero
 
-- The modules `apps/web/public/js/*.js` (landing, cloud-relief, bust-section, three.min, gsap.min) are vanilla JS, IIFE,
+- The modules `apps/web/public/js/*.js` (landing, cloud-relief, three.min, gsap.min) are vanilla JS, IIFE,
   `'use strict'`, globals `THREE`/`gsap`, and start immediately on load. Do not import them into React and do not insert
   `<script>` in JSX: the DOM they change breaks hydration. They are loaded only via
   `src/_pages/home/ui/landing-scripts.tsx`, in order, after hydration.
@@ -19,5 +19,5 @@ paths:
 - Respect `prefers-reduced-motion`, handle WebGL context loss, have a no-WebGL fallback.
 - Mobile: touch events, `viewport-fit=cover`, devicePixelRatio is capped.
 - Comments on shaders and physics are written in Russian, in detail, with formulas.
-- Do not read heavy files (`three.min.js`, `gsap.min.js`, `bust-section.js`) in full — grep and pieces.
+- Do not read heavy files (`three.min.js`, `gsap.min.js`) in full — grep and pieces.
 - Visual quality (droplet shape, smoothness, composition) is judged by the main session or the owner, not by agents.

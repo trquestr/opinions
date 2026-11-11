@@ -9,10 +9,17 @@ import { HomePage } from './home-page';
 afterEach(cleanup);
 
 describe('HomePage', () => {
-  it('рендерит h1, секцию бюста и WebGL-канвас', () => {
+  it('рендерит h1, слой облаков и WebGL-канвас', () => {
     const { container } = render(<HomePage />);
     expect(container.querySelector('h1')?.textContent).toBe('UNTESIS');
-    expect(container.querySelector('#sculpture-section')).not.toBeNull();
+    expect(container.querySelector('#drifting-clouds-layer')).not.toBeNull();
     expect(container.querySelector('#gl-canvas')).not.toBeNull();
+  });
+
+  it('не рендерит убранные декоративные части пролога', () => {
+    const { container } = render(<HomePage />);
+    for (const selector of ['#sculpture-section', '#hero-orbits', '#hero-arches', '#hero-scroll-down']) {
+      expect(container.querySelector(selector)).toBeNull();
+    }
   });
 });

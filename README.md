@@ -3,8 +3,8 @@
 A personal library of opinions: every day — one question, a short answer, and over time — a history of how views have
 changed. Concept — [`Идеи.md`](Идеи.md), architecture and domain map — [`docs/architecture.md`](docs/architecture.md).
 
-Currently ready: the promo landing with the WebGL hero (the **UNTESIS** wordmark made of ink droplets, clouds, a dotted
-bust) and the infrastructure for the product's domains.
+Currently ready: the promo landing with the WebGL hero (the **UNTESIS** wordmark made of ink droplets and clouds) and
+the infrastructure for the product's domains.
 
 ## Contents
 

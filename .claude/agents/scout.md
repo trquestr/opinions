@@ -11,7 +11,7 @@ Code:
 - Look for library documentation first through context7 (`resolve-library-id` → `query-docs`, with the version from `yarn.lock`), on the web — if it is not there.
 - Code graph first, if available: MCP `mcp__code-review-graph__*` (load via ToolSearch with the query `+code-review-graph`),
   `semantic_search_nodes_tool`, `query_graph_tool`. Otherwise Grep/Glob, then Read only the needed chunks.
-- `three.min.js`, `bust-section.js`, `point-bust*.html` are huge — only grep with a narrow pattern and `offset/limit`.
+- `three.min.js` and `gsap.min.js` are huge — only grep with a narrow pattern and `offset/limit`.
 - Bash only for reading (`git log`, `git show`, `ls`, `wc`). Create and change nothing.
 
 Web:

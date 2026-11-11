@@ -9,7 +9,7 @@ err() { echo "FAIL: $*"; fail=1; }
 loader=apps/web/src/_pages/home/ui/landing-scripts.tsx
 pub=apps/web/public
 
-for f in landing.js cloud-relief.js bust-section.js; do
+for f in landing.js cloud-relief.js; do
   out=$(node --check "$pub/js/$f" 2>&1) || err "syntax $f: $(echo "$out" | grep -m1 -E 'Error|error')"
 done
 

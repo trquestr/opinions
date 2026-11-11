@@ -20,8 +20,6 @@
 
   const canvas = document.getElementById('gl-canvas');
 
-  const heroScrollDown = document.getElementById('hero-scroll-down');
-
   const hero = document.querySelector('.hero');
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
   let frameId = 0;
@@ -584,124 +582,9 @@
   const cursorReveal = { value: 0 };
   let cursorRevealTween = null;
 
-  const scrollDotElements = [
-    document.getElementById('scroll-dot-0'),
-    document.getElementById('scroll-dot-1'),
-    document.getElementById('scroll-dot-2')
-  ];
-
-  let scrollDotsTimeline = null;
-  let scrollDotsDelayedCall = null; // пауза 0.45с между циклами — храним, чтобы stop убивал её
-  let scrollDotsActive = false;
   // Положение относительно первого экрана по последнему scroll-событию: null — неизвестно (применить заново),
   // true — ниже сгиба (анимации на паузе), false — выше (анимации идут). Сбрасывается в null при пересоздании твинов.
   let scrollBelowFold = null;
-
-  // Тайминги цикла точек: появление по очереди сверху вниз, затем стекание вниз с затуханием
-  const DOT_APPEAR_DUR = [0.48, 0.46, 0.42];
-  const DOT_APPEAR_AT = [0.0, 0.28, 0.54];
-  const DOT_FADE_AT = [1.76, 1.96, 2.16];
-  const DOT_FADE_DUR = 0.44;
-
-  function stopScrollDotsAnimation() {
-    scrollDotsActive = false;
-    if (scrollDotsDelayedCall) {
-      scrollDotsDelayedCall.kill();
-      scrollDotsDelayedCall = null;
-    }
-    if (scrollDotsTimeline) {
-      scrollDotsTimeline.kill();
-      scrollDotsTimeline = null;
-    }
-    if (scrollDotElements[0] && window.gsap) {
-      window.gsap.set(scrollDotElements, { opacity: 0, scale: 0.3, y: -5 });
-    }
-  }
-
-  function startScrollDotsAnimation() {
-    if (scrollDotsActive || !scrollDotElements[0] || !window.gsap) return;
-    scrollDotsActive = true;
-
-    if (motionPreference.matches) {
-      window.gsap.set(scrollDotElements, { opacity: 0.95, scale: 1, y: 0 });
-      return;
-    }
-
-    const dotConfigs = [
-      // 1. Top right, mid left, bottom center (matches reference screenshot)
-      [
-        { x: 3.2, y: -22.5, r: 6.2 },
-        { x: -5.5, y: -1.0, r: 5.2 },
-        { x: -0.8, y: 19.0, r: 2.4 }
-      ],
-      // 2. Top left, mid right, bottom slight right
-      [
-        { x: -3.0, y: -23.0, r: 5.9 },
-        { x: 4.5, y: -1.5, r: 4.9 },
-        { x: 1.0, y: 19.5, r: 2.5 }
-      ],
-      // 3. Top center-right, mid slight left, bottom slight left
-      [
-        { x: 1.8, y: -22.0, r: 6.4 },
-        { x: -4.0, y: -0.5, r: 5.4 },
-        { x: -1.2, y: 18.5, r: 2.3 }
-      ],
-      // 4. Top slight left, mid center, bottom center
-      [
-        { x: -2.0, y: -22.5, r: 6.0 },
-        { x: 3.0, y: -2.0, r: 5.0 },
-        { x: 0.5, y: 19.2, r: 2.6 }
-      ]
-    ];
-
-    let cycleIndex = 0;
-
-    function playNextCycle() {
-      if (!scrollDotsActive) return;
-      const cfg = dotConfigs[cycleIndex % dotConfigs.length];
-      cycleIndex++;
-
-      scrollDotElements.forEach((dot, i) => {
-        dot.setAttribute('cx', cfg[i].x);
-        dot.setAttribute('cy', cfg[i].y);
-        dot.setAttribute('r', cfg[i].r);
-        window.gsap.set(dot, { opacity: 0, scale: 0.3, y: -5 });
-      });
-
-      scrollDotsTimeline = window.gsap.timeline({
-        onComplete() {
-          if (scrollDotsActive) {
-            scrollDotsDelayedCall = window.gsap.delayedCall(0.45, playNextCycle);
-          }
-        }
-      });
-
-      // 1. Dots appear one by one from top to bottom
-      for (let i = 0; i < 3; i++) {
-        scrollDotsTimeline.to(scrollDotElements[i], {
-          opacity: 0.95,
-          scale: 1,
-          y: 0,
-          duration: DOT_APPEAR_DUR[i],
-          ease: 'back.out(1.4)'
-        }, DOT_APPEAR_AT[i]);
-      }
-
-      // 2. Hold all 3 visible in vertical column (0.54s + 0.42s = 0.96s -> 1.76s = 0.8s hold)
-      // 3. Trickle / drift downward and fade out in sequence
-      for (let i = 0; i < 3; i++) {
-        scrollDotsTimeline.to(scrollDotElements[i], {
-          opacity: 0,
-          scale: 0.4,
-          y: 6,
-          duration: DOT_FADE_DUR,
-          ease: 'power2.in'
-        }, DOT_FADE_AT[i]);
-      }
-    }
-
-    playNextCycle();
-  }
 
   function setCursorEnabled(enabled) {
     cursorEnabled = !!enabled;
@@ -713,15 +596,13 @@
 
     if (cursorEnabled) {
       hero.classList.add('cursor-ready');
-      if (heroScrollDown) heroScrollDown.classList.add('is-visible');
-      startScrollDotsAnimation();
       startDriftingClouds();
       if (lastPointerX >= 0 && lastPointerY >= 0 && !document.hidden) {
         pointer.moveTo(lastPointerX, lastPointerY);
       }
       cursorReveal.value = 0;
       if (window.gsap && !motionPreference.matches) {
-        // Synchronized with celestial orbit rings (1.8s sine.out): liquid cursor emerges gently and majestically
+        // Плавное проявление жидкого курсора (1.8с, sine.out)
         cursorRevealTween = window.gsap.to(cursorReveal, {
           value: 1,
           duration: 1.8,
@@ -734,8 +615,6 @@
       scheduleRender();
     } else {
       hero.classList.remove('cursor-ready');
-      if (heroScrollDown) heroScrollDown.classList.remove('is-visible');
-      stopScrollDotsAnimation();
       stopDriftingClouds();
       cursorReveal.value = 0;
       pointer.leave();
@@ -753,184 +632,6 @@
       cursorWaves.length = 0;
       scheduleRender();
     }
-  }
-
-  // ==========================================================================
-  // ГЕРОИЧЕСКАЯ КОМПОЗИЦИЯ: ОРБИТАЛЬНЫЕ ЛИНИИ
-  // ==========================================================================
-  const heroComposition = document.getElementById('hero-composition');
-  const heroOrbitsWrapper = document.getElementById('hero-orbits-wrapper');
-  const heroOrbits = document.getElementById('hero-orbits');
-  const heroAxisSvg = document.getElementById('hero-axis-svg');
-  const heroEllipseRunner = document.getElementById('hero-ellipse-runner');
-
-  // Контейнер орбит (качается в 3D) и элементы, которые проявляются вместе с ним
-  const orbitsContainer = heroOrbitsWrapper || heroOrbits;
-  const orbitElements = [orbitsContainer, heroAxisSvg].filter(Boolean);
-
-  const cosR = Math.cos(-11 * Math.PI / 180);
-  const sinR = Math.sin(-11 * Math.PI / 180);
-  const ellipseRunnerObj = { angle: 0 };
-  // Бесконечные твины орбит: бегунок по эллипсу и три покачивания (rotationX/Y/Z) контейнера
-  const ORBIT_RUNNER = 0;
-  const ORBIT_SWAY_X = 1;
-  const ORBIT_SWAY_Y = 2;
-  const ORBIT_SWAY_Z = 3;
-  const orbitTweens = [null, null, null, null];
-
-  function updateEllipseRunnerPosition(t) {
-    if (!heroEllipseRunner) return;
-    const ex = 650 * Math.cos(t);
-    const ey = 230 * Math.sin(t);
-    const x = ex * cosR - ey * sinR;
-    const y = ex * sinR + ey * cosR;
-    heroEllipseRunner.setAttribute('cx', x.toFixed(2));
-    heroEllipseRunner.setAttribute('cy', y.toFixed(2));
-  }
-
-  function setOrbitsActive(on) {
-    if (heroComposition) heroComposition.classList.toggle('is-active-orbits', on);
-    if (heroOrbits) heroOrbits.classList.toggle('is-active-orbits', on);
-    if (heroAxisSvg) heroAxisSvg.classList.toggle('is-active-orbits', on);
-  }
-
-  // Пауза/возобновление бесконечных твинов орбит при уходе за первый экран
-  function pauseOrbitTweens() {
-    for (let i = 0; i < orbitTweens.length; i++) {
-      const tw = orbitTweens[i];
-      if (tw && tw.isActive()) tw.pause();
-    }
-  }
-
-  function resumeOrbitTweens() {
-    for (let i = 0; i < orbitTweens.length; i++) {
-      const tw = orbitTweens[i];
-      if (tw && tw.paused()) tw.play();
-    }
-  }
-
-  function startOrbitMotion() {
-    killIdleTweens();
-    if (motionPreference.matches || !window.gsap) return;
-    setOrbitsActive(true);
-
-    if (heroEllipseRunner) {
-      orbitTweens[ORBIT_RUNNER] = window.gsap.to(ellipseRunnerObj, {
-        angle: Math.PI * 2,
-        duration: 32,
-        repeat: -1,
-        ease: 'none',
-        onUpdate() {
-          updateEllipseRunnerPosition(ellipseRunnerObj.angle);
-        }
-      });
-    }
-
-    // Gentle 3D oscillation of orbital rings around the central horizontal axis
-    if (orbitsContainer) {
-      window.gsap.set(orbitsContainer, {
-        xPercent: -50,
-        yPercent: -50,
-        x: 0,
-        y: 0,
-        transformOrigin: '50% 50%'
-      });
-
-      // 1. Slow 3D tilt around the horizontal axis (X-axis): ±5.5 degrees, ~16s cycle
-      orbitTweens[ORBIT_SWAY_X] = window.gsap.fromTo(orbitsContainer,
-        { rotationX: -5.5 },
-        {
-          rotationX: 5.5,
-          duration: 16,
-          ease: 'sine.inOut',
-          yoyo: true,
-          repeat: -1
-        }
-      );
-
-      // 2. Subtle precession out of plane (Y-axis): ±2.5 degrees, ~21s cycle
-      orbitTweens[ORBIT_SWAY_Y] = window.gsap.fromTo(orbitsContainer,
-        { rotationY: -2.5 },
-        {
-          rotationY: 2.5,
-          duration: 21,
-          ease: 'sine.inOut',
-          yoyo: true,
-          repeat: -1
-        }
-      );
-
-      // 3. Gentle axial roll (Z-axis): ±1.2 degrees, ~26s cycle
-      orbitTweens[ORBIT_SWAY_Z] = window.gsap.fromTo(orbitsContainer,
-        { rotationZ: -1.2 },
-        {
-          rotationZ: 1.2,
-          duration: 26,
-          ease: 'sine.inOut',
-          yoyo: true,
-          repeat: -1
-        }
-      );
-    }
-  }
-
-  function killIdleTweens() {
-    scrollBelowFold = null;
-    for (let i = 0; i < orbitTweens.length; i++) {
-      if (orbitTweens[i]) {
-        orbitTweens[i].kill();
-        orbitTweens[i] = null;
-      }
-    }
-    if (orbitsContainer && window.gsap) {
-      window.gsap.set(orbitsContainer, { rotationX: 0, rotationY: 0, rotationZ: 0 });
-    }
-    setOrbitsActive(false);
-  }
-
-  function setupHeroArtwork() {
-    killIdleTweens();
-    stopDriftingClouds();
-    ellipseRunnerObj.angle = 0;
-    updateEllipseRunnerPosition(0);
-
-    if (orbitElements.length) {
-      setOrbitsActive(false);
-      if (window.gsap) {
-        window.gsap.set(orbitElements, { opacity: 0 });
-      } else {
-        orbitElements.forEach(el => { el.style.opacity = '0'; });
-      }
-    }
-  }
-
-  function showHeroArtworkInstant() {
-    killIdleTweens();
-    if (window.gsap) {
-      window.gsap.set(orbitElements, { opacity: 1 });
-    } else {
-      orbitElements.forEach(el => { el.style.opacity = '1'; });
-    }
-    startOrbitMotion();
-    startDriftingClouds();
-  }
-
-  function createHeroArtworkTimeline() {
-    if (!orbitElements.length || !window.gsap) return null;
-    const tl = window.gsap.timeline({
-      onComplete() {
-        startOrbitMotion();
-      }
-    });
-
-    // 1. Плавное проявление орбит и горизонтальной оси 70vw
-    tl.to(orbitElements, {
-      opacity: 1,
-      duration: 1.8,
-      ease: 'sine.out'
-    }, 0);
-
-    return tl;
   }
 
   // ==========================================================================
@@ -1168,7 +869,6 @@
     if (mainTimeline) {
       mainTimeline.kill();
     }
-    killIdleTweens();
 
     setCursorEnabled(false);
     buildWordAndDrops();
@@ -1178,11 +878,8 @@
     if (!canAnimate) {
       for (const drop of drops) Object.assign(drop, { emerge: 1, flight: 1, absorb: 1, prevFlight: 1, prevAbs: 1 });
       setCursorEnabled(true);
-      showHeroArtworkInstant();
       return;
     }
-
-    setupHeroArtwork();
 
     // Очерёдность появления и вылета капель:
     // 1) Финальные 8 капель хвоста выбираются из близких/умеренных дистанций к буквам,
@@ -1355,15 +1052,9 @@
       setCursorEnabled(true);
     }, null, maxAbsorbEnd);
 
-    const artworkTl = createHeroArtworkTimeline();
-    if (artworkTl) {
-      mainTimeline.add(artworkTl, maxAbsorbEnd);
-    }
-
     mainTimeline.progress(progress);
     if (progress >= 0.999) {
       setCursorEnabled(true);
-      showHeroArtworkInstant();
     }
     if (document.hidden) mainTimeline.pause();
   }
@@ -1992,15 +1683,11 @@
     if (scrollY > window.innerHeight) {
       if (scrollBelowFold !== true) {
         scrollBelowFold = true;
-        if (scrollDotsActive) stopScrollDotsAnimation();
         pauseDriftingClouds();
-        pauseOrbitTweens();
       }
     } else if (cursorEnabled && scrollBelowFold !== false) {
       scrollBelowFold = false;
-      if (!scrollDotsActive) startScrollDotsAnimation();
       resumeDriftingClouds();
-      resumeOrbitTweens();
     }
     scheduleRender();
   }, { passive: true });
@@ -2009,7 +1696,7 @@
     lastPointerX = e.clientX;
     lastPointerY = e.clientY;
     if (!cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) setCursorEnabled(true);
-    if (motionPreference.matches || e.target.closest('button, a, .hero-scroll-down')) {
+    if (motionPreference.matches || e.target.closest('button, a')) {
       pointer.leave();
       return;
     }
@@ -2021,7 +1708,7 @@
     lastPointerX = e.clientX;
     lastPointerY = e.clientY;
     if (!cursorEnabled && (!mainTimeline || !mainTimeline.isActive())) setCursorEnabled(true);
-    if (motionPreference.matches || e.target.closest('button, a, .hero-scroll-down')) {
+    if (motionPreference.matches || e.target.closest('button, a')) {
       pointer.leave();
       return;
     }
@@ -2074,16 +1761,6 @@
     mainTimeline?.kill();
     showFallback();
   });
-
-  if (heroScrollDown) {
-    heroScrollDown.addEventListener('click', (e) => {
-      const target = document.getElementById('sculpture-section');
-      if (target) {
-        e.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
-  }
 
   resizeAll();
   hero.classList.add('is-ready');
