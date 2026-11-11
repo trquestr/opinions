@@ -1,7 +1,7 @@
 @font-face {
   font-family: 'Untesis';
-  src: url('assets/fonts/Untesis.woff2') format('woff2'),
-       url('assets/fonts/Untesis.ttf') format('truetype');
+  src: url('/assets/fonts/Untesis.woff2') format('woff2'),
+       url('/assets/fonts/Untesis.ttf') format('truetype');
   font-style: normal;
   font-weight: 200;
   font-display: swap;
@@ -9,8 +9,8 @@
 
 @font-face {
   font-family: 'Untesis Display';
-  src: url('assets/fonts/Untesis-Display.woff2') format('woff2'),
-       url('assets/fonts/Untesis-Display.ttf') format('truetype');
+  src: url('/assets/fonts/Untesis-Display.woff2') format('woff2'),
+       url('/assets/fonts/Untesis-Display.ttf') format('truetype');
   font-style: normal;
   font-weight: 200;
   font-display: swap;

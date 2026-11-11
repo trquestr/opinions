@@ -15,7 +15,7 @@ from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
 from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'assets' / 'fonts'
+OUT = ROOT / 'apps' / 'web' / 'public' / 'assets' / 'fonts'
 K = 0.5522847498307936
 
 

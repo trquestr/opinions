@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      # Node 26 не несёт актуальный corepack - ставим свежий и включаем (Yarn 4 из packageManager).
+      - run: npm i -g corepack@latest
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn lint
+      - run: yarn test
+      - run: yarn build
+      - name: Audit
+        run: yarn npm audit --all --recursive --severity high
+        continue-on-error: true

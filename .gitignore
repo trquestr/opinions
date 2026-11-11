@@ -6,3 +6,18 @@ desktop.ini
 *.log
 __pycache__/
 *.pyc
+node_modules/
+.next/
+dist/
+.env*
+!.env.example
+*.tsbuildinfo
+
+# yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+.pnp.*
+
+coverage/

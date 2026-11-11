@@ -1,33 +1,34 @@
-# UNTESIS — промо-лендинг «Мнения»
+# UNTESIS — «Мнения»
 
-Минималистичный лендинг с WebGL-героем: вордмарк **UNTESIS** собирается из органических чернильных капель,
+Монорепо: фронт на **Next.js 16** (SSR, для SEO) и бэк на **NestJS 12**.
+Сейчас фронт — промо-лендинг с WebGL-героем: вордмарк **UNTESIS** собирается из чернильных капель,
 по экрану дрейфуют объёмные облака, вокруг — пунктирные орбиты, ниже — интерактивный точечный бюст.
 
-- **GitHub Pages:** https://trquestr.github.io/opinions/
-- **Лаборатория флюидного курсора:** https://trquestr.github.io/opinions/playground.html
+## Структура
 
-## Что внутри
-
-- **Вордмарк из капель** (`landing.js`): капли рождаются на холсте и по касательным траекториям вливаются
-  в штрихи букв; слияние — гладкий полиномиальный минимум (`smin`) SDF во фрагментном шейдере WebGL2.
-  Хореография — GSAP.
-- **Флюидный курсор:** скрытое поле точек проявляется под курсором с метабол-слиянием, инерцией и волной по клику.
-- **Дрейфующие облака** (`cloud-relief.js`, three.js): рельеф по heightmap/normal-картам из `assets/cloud_NN_*.png`,
-  3D-наклон за курсором, фолбэк на `<img>`.
-- **Точечный бюст** (`bust-section.js`, WebGL2): запечённые точки, вихрь от курсора, рендер только в зоне видимости.
-- Уважает `prefers-reduced-motion`, ограничивает devicePixelRatio, работает на тач-устройствах.
+- `apps/web` — Next.js (App Router). Разметка рендерится на сервере, WebGL-модули героя
+  (`public/js/`) подгружаются на клиенте после гидрации (`app/landing-scripts.tsx`).
+- `apps/api` — NestJS, ручки под `/api` (пока `GET /api/health`).
 
 ## Запуск
 
-Статика без сборки. Из корня репозитория:
+Нужны Node 26 LTS (`.nvmrc`) и Yarn 4 через corepack (`corepack enable`).
 
 ```bash
-python -m http.server 8000
+yarn install
+yarn dev:web   # http://localhost:3000
+yarn dev:api   # http://localhost:4000/api/health
 ```
 
-и открыть http://localhost:8000/index.html (через `file://` текстуры и шрифты не загрузятся).
+Сборка, линт, тесты: `yarn build`, `yarn lint`, `yarn test`, быстрые проверки — `bash scripts/check.sh`.
 
-## Технологии
+Переменные: `NEXT_PUBLIC_SITE_URL` (canonical, sitemap) для web; `PORT`, `WEB_ORIGIN` (CORS) для api.
 
-WebGL2 (GLSL), three.js (локальный `three.min.js`), GSAP 3.12.5, vanilla JS (ES6+), HTML/CSS,
-свой шрифт Untesis (`assets/fonts/`, сборка — `scripts/build_final_untesis_font.py`).
+## Правила кода
+
+В `.claude/rules/`: общие (безопасность, отказоустойчивость, тесты, эффективность), фронт, бэк, WebGL-герой.
+
+## Технологии героя
+
+WebGL2 (GLSL), three.js (локальный), GSAP 3.12.5, свой шрифт Untesis
+(`apps/web/public/assets/fonts/`, сборка — `scripts/build_final_untesis_font.py`).

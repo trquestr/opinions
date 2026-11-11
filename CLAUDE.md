@@ -1,52 +1,75 @@
-# «Мнения» — лендинг
+# «Мнения»
 
 Продукт «Мнения»: площадка, где мнение — это **один короткий простой ответ** на вопрос (см. `Идеи.md`).
-Сейчас в репозитории только промо-лендинг с WebGL-героем. Владелец общается по-русски — отвечай по-русски.
+Сейчас есть промо-лендинг с WebGL-героем и каркас фронта/бэка. Владелец общается по-русски — отвечай по-русски.
 
 ## Стек и запуск
 
-- Статика без сборки: HTML + CSS + vanilla JS (ES6+, IIFE, `'use strict'`). Нет package.json, npm, бандлера, тестов.
-- WebGL: свои GLSL-шейдеры (`landing.js`, `bust-section.js`; в стендах — `hero-ring.js`, `fluid-cursor.js`) и three.js (`three.min.js`, локальный, для `cloud-relief.js`).
-- GSAP 3.12.5 с jsDelivr (`defer`).
-- Локальный сервер: `python -m http.server 8000` из корня (конфиг `preview` в `.claude/launch.json`),
-  страница — http://localhost:8000/index.html. Через `file://` не открывать: текстуры и шрифты не загрузятся.
-- Деплой: GitHub Pages из `main` → https://trquestr.github.io/opinions/. Пуш в `main` = выкладка, только по просьбе владельца.
+Монорепо на **Yarn 4** workspaces (`apps/*`, `nodeLinker: node-modules`), **Node 26 LTS** (`.nvmrc`, `nvm use 26.13.0`).
+Yarn — через corepack (`packageManager` в корневом `package.json`); npm в проекте не использовать.
+Пакет в приложение: `yarn workspace web add <pkg>` / `yarn workspace api add <pkg>` — только с решения владельца.
+
+- `apps/web` — **Next.js 16** (App Router, React 19, Turbopack, `cacheComponents`). SSR/пререндер обязателен — нужен SEO:
+  контент страниц рендерится на сервере, метаданные через `metadata`, `robots.ts`, `sitemap.ts`;
+  базовый URL — `NEXT_PUBLIC_SITE_URL`. API Next 16 отличается от привычного: перед кодом смотреть
+  `node_modules/next/dist/docs/` (см. `apps/web/AGENTS.md`).
+- `apps/api` — **NestJS 12** (ESM, Vitest, oxlint). Все ручки под префиксом `/api`, порт `PORT` (4000), CORS на `WEB_ORIGIN`.
+  Пока есть только `GET /api/health`. Свежая дока Nest — https://docs.nestjs.com/llms.txt (см. `apps/api/AGENTS.md`).
+- Команды из корня: `yarn dev:web` (:3000), `yarn dev:api` (:4000), `yarn build`, `yarn lint`, `yarn test`.
+  CI — `.github/workflows/ci.yml` (install --immutable, lint, test, build, audit).
+  Конфиги превью в `.claude/launch.json`: `web`, `api`, `attach` (если :3000 уже поднят).
+- Деплой пока не настроен: GitHub Pages SSR не умеет, нужен Node-хостинг. Пуш в `main` — только по просьбе владельца.
 
 ## Карта файлов
 
-| Файл | Что это |
+| Путь | Что это |
 |---|---|
-| `index.html` / `landing.html` | Главная страница. **Два одинаковых файла** — любая правка делается в обоих (проверка: `diff -q index.html landing.html`) |
-| `landing.css`, `landing.js` | Стили и основная логика героя: сборка вордмарка из капель (SDF + `smin`), хореография GSAP |
-| `cloud-relief.js` | Облака на three.js: рельеф по heightmap/normal-картам из `assets/cloud_NN_*.png`, дрейф, 3D-наклон, фолбэк на `<img>` |
-| `hero-ring.js` | Орбитальное кольцо (WebGL, аналитическое, сверено с `assets/orbital-ring-ref.jpg`). На главной не подключено — только `ring-specimen.html` |
-| `bust-section.js` | Секция с точечным бюстом (большой файл с данными точек — читать кусками) |
-| `fluid-cursor.js` + `playground.html` + `style.css` | Флюидный курсор-метабол и лаборатория его параметров |
-| `*-specimen.html`, `point-bust.html` | Стенды для отдельных эффектов (на главной не подключены) |
-| `assets/fonts/` + `scripts/build_final_untesis_font.py` | Свой шрифт Untesis (капитель, только заглавные) и его сборка (fonttools, skia-pathops) |
+| `apps/web/app/layout.tsx` | Корневой layout: `lang="ru"`, SEO-метаданные, viewport, preload шрифта |
+| `apps/web/app/page.tsx` | Лендинг: разметка героя рендерится на сервере (server component) |
+| `apps/web/app/landing-scripts.tsx` | Клиентский загрузчик старых модулей героя по порядку **после гидрации**; здесь же их `?v=N` |
+| `apps/web/app/landing.css` | Стили лендинга (импорт в layout, бандлит Next) |
+| `apps/web/public/js/landing.js` | Логика героя: вордмарк из капель (SDF + `smin`), флюидный курсор, хореография GSAP |
+| `apps/web/public/js/cloud-relief.js` | Облака на three.js: рельеф по heightmap/normal-картам, дрейф, 3D-наклон, фолбэк на `<img>` |
+| `apps/web/public/js/bust-section.js` | Секция с точечным бюстом (большой файл с данными точек — читать кусками) |
+| `apps/web/public/js/three.min.js`, `gsap.min.js` | three.js и GSAP 3.12.5, локальные (без CDN) |
+| `apps/web/public/assets/` | Картинки, карты облаков, шрифты (`fonts/`), исходники бюста (`credits.json` — лицензии) |
+| `apps/web/security-headers.ts` | CSP и заголовки безопасности (подключены в `next.config.ts`) |
+| `apps/api/src/` | Nest: `main.ts` (bootstrap), `configure-app.ts` (заголовки, префикс, CORS, shutdown), `config/env.schema.ts` (zod-схема env), `app.module.ts` (config, throttler), health |
+| `.claude/rules/` | Правила кода (см. ниже) |
+| `scripts/build_final_untesis_font.py` | Сборка шрифта Untesis (fonttools, skia-pathops) → `apps/web/public/assets/fonts/` |
+| `scripts/check.sh` | Быстрые проверки одной командой |
 | `Идеи.md` | Продуктовые идеи и ограничения дизайна |
 
 ## Правила кода
 
-- **Кэш-бастинг:** подключения в HTML идут с `?v=N` (`landing.css`, `landing.js`, `cloud-relief.js`, `bust-section.js`).
-  Изменил CSS/JS — подними его `v` в обоих HTML, иначе на Pages останется старая версия.
-- Повторяй стиль соседнего кода: IIFE, `const`/`let`, комментарии к шейдерам и физике — по-русски, подробно, с формулами.
-- Никаких фреймворков, npm-зависимостей и бандлеров без решения владельца. Внешние скрипты — только с закреплённой версией.
-- Производительность — требование: 60 FPS, никакой аллокации в `requestAnimationFrame`, `uniform`-ы не загружать каждый кадр без нужды,
-  уважать `prefers-reduced-motion`, обрабатывать потерю WebGL-контекста и иметь фолбэк.
-- Мобильные: тач-события, `viewport-fit=cover`, devicePixelRatio ограничен.
-- Тяжёлые файлы (`three.min.js`, `bust-section.js`, `point-bust*.html`) целиком не читать — только grep и куски.
+Подробные правила — в `.claude/rules/` (Claude Code подгружает их сам, по путям файлов). **Перед кодом — прочитать нужные:**
+
+| Файл | Где действует | О чём |
+|---|---|---|
+| `.claude/rules/general.md` | везде | Документация через context7, TypeScript, безопасность (OWASP), устойчивость к отказам, тесты, эффективность |
+| `.claude/rules/web.md` | `apps/web/**` | SSR/SEO, Server/Client Components, Data Access Layer, CSP и заголовки, error boundaries, Core Web Vitals |
+| `.claude/rules/api.md` | `apps/api/**` | Модули Nest, валидация, guard'ы, rate limit, CORS, graceful shutdown, health, e2e-тесты |
+| `.claude/rules/hero.md` | `public/js/**`, `landing-scripts.tsx`, `landing.css` | WebGL-герой: загрузка после гидрации, `?v=N`, 60 FPS, фолбэки |
+
+Коротко, без чего изменение не принимается:
+- **Доку библиотек — через context7** (`resolve-library-id` → `query-docs` с версией из `yarn.lock`), а не по памяти.
+- Каждый внешний вход валидируется схемой (zod), доступ проверяется на каждом эндпоинте и объекте, ошибки — fail closed.
+- Каждый исходящий вызов — с таймаутом; ретраи только идемпотентных, с backoff и jitter; ошибки не глотать.
+- Новый код — с тестами в том же изменении, покрытие ≥ 80%, тесты не ослаблять.
+- Новые зависимости, ORM, БД, UI-киты — только по решению владельца.
 - Коммиты: короткое английское сообщение в стиле истории (`feat: …`, `Fix …`), только по просьбе владельца.
 
 ## Как проверять изменения
 
-1. `bash scripts/check.sh` — синтаксис JS, совпадение `index.html`/`landing.html`, существование всех `src`/`href`,
-   поднятый `?v=` у изменённых CSS/JS. Одна команда, агент не нужен.
-2. Браузер — один заход: перезагрузка → ожидание ~12 с → ошибки консоли → скриншот десктоп + 375px. Без повторных ожиданий.
+1. `bash scripts/check.sh` — синтаксис модулей героя, наличие файлов из `SCRIPTS`, поднятый `?v=`, lint и тесты
+   обоих приложений. Одна команда, агент не нужен. Перед коммитом — ещё `yarn build`; покрытие — `yarn workspace <web|api> test:cov`.
+2. Браузер — один заход: `preview_start` `name: "web"` → ожидание ~15 с (интро: белый экран, потом капли собирают вордмарк)
+   → ошибки консоли → скриншот десктоп + 375px. Без повторных ожиданий.
    - Сначала `tabs_context`. Если панель скрыта — сразу попросить владельца её открыть (в скрытой панели нет rAF,
      анимация стоит). Headless Chrome/Edge для WebGL не пробовать — рисует белый кадр.
-   - Если :8000 уже отвечает (`curl -s -o /dev/null -w "%{http_code}" localhost:8000/index.html`) — `preview_start`
-     с `name: "attach"`, второй сервер не поднимать. Изменённый файл без нового `?v=` браузер берёт из кэша.
+   - Если :3000 уже отвечает — `preview_start` с `name: "attach"`, второй сервер не поднимать.
+   - Ошибка консоли `getComputedStyle ... at eff (<anonymous>)` — от инструментов панели, не от страницы.
+   - SEO без браузера: `curl -s localhost:3000/ | grep -E '<title>|<h1|description'` — контент должен быть в HTML.
 3. Визуальное качество (форма капель, плавность, композиция) оценивает основная сессия или владелец — не агенты.
 
 ## Агенты проекта (`.claude/agents/`)

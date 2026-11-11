@@ -1,28 +1,29 @@
 #!/usr/bin/env bash
-# Быстрые статические проверки лендинга одной командой: bash scripts/check.sh
-# 1) node --check для JS, 2) index.html == landing.html,
-# 3) все локальные src/href из index.html существуют, 4) изменённые CSS/JS без поднятого ?v=.
-# Выводит только проблемы и итоговую строку; код возврата 1, если что-то не так.
+# Быстрые проверки одной командой: bash scripts/check.sh
+# 1) node --check старых модулей героя, 2) все файлы из SCRIPTS в landing-scripts.tsx существуют,
+# 3) изменённые public/js/*.js без поднятого ?v=, 4) lint обоих приложений, 5) тесты api.
+# Сборку (yarn build) не гоняет — она дольше; запускай перед коммитом отдельно.
 cd "$(dirname "$0")/.." || exit 1
 fail=0
 err() { echo "FAIL: $*"; fail=1; }
+loader=apps/web/app/landing-scripts.tsx
+pub=apps/web/public
 
-for f in landing.js cloud-relief.js bust-section.js hero-ring.js fluid-cursor.js; do
-  [ -f "$f" ] || continue
-  out=$(node --check "$f" 2>&1) || err "syntax $f: $(echo "$out" | grep -m1 -E 'Error|error')"
+for f in landing.js cloud-relief.js bust-section.js; do
+  out=$(node --check "$pub/js/$f" 2>&1) || err "syntax $f: $(echo "$out" | grep -m1 -E 'Error|error')"
 done
 
-diff -q index.html landing.html >/dev/null || err "index.html и landing.html различаются"
-
-for ref in $(grep -oE '(src|href)="[^"#]+"' index.html | sed -E 's/^(src|href)="//; s/"$//; s/\?.*$//' | grep -vE '^(https?:)?//'); do
-  [ -e "$ref" ] || err "нет файла: $ref"
+for ref in $(grep -oE '"/js/[^"?]+' "$loader" | sed 's/^"//'); do
+  [ -e "$pub$ref" ] || err "нет файла: $pub$ref"
 done
 
-# Файл изменён относительно HEAD, а строка с его ?v= в index.html — нет
-changed=$(git diff --name-only HEAD -- '*.js' '*.css' 2>/dev/null)
-for f in $changed; do
-  grep -q "\"$f?v=" index.html || continue
-  git diff HEAD -- index.html | grep -q "^+.*$f?v=" || err "$f изменён, а ?v= в HTML не поднят"
+for f in $(git diff -M --name-only --diff-filter=M HEAD -- "$pub/js/*.js" 2>/dev/null); do
+  name=${f#"$pub"}
+  grep -q "\"$name?v=" "$loader" || continue
+  git diff HEAD -- "$loader" | grep -q "^+.*$name?v=" || err "$name изменён, а ?v= в $loader не поднят"
 done
+
+yarn lint >/dev/null 2>&1 || err "lint (yarn lint)"
+yarn test >/dev/null 2>&1 || err "тесты api (yarn test)"
 
 [ $fail -eq 0 ] && echo "check: OK" || exit 1

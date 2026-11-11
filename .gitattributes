@@ -1,1 +1,10 @@
-*.sh text eol=lf
+# Весь текст в репозитории — с LF (Windows-клиенты не превращают в CRLF).
+* text=auto eol=lf
+
+# Бинарные файлы не трогаем.
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.woff2 binary
+*.ttf binary
