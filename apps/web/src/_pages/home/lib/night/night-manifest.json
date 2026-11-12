@@ -1,0 +1,82 @@
+{
+  "fixedPoint": 100,
+  "stars": [
+    {
+      "name": "Dubhe",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "name": "Merak",
+      "x": 0,
+      "y": 22
+    },
+    {
+      "name": "Phecda",
+      "x": 31,
+      "y": 34
+    },
+    {
+      "name": "Megrez",
+      "x": 44,
+      "y": 20
+    },
+    {
+      "name": "Alioth",
+      "x": 68,
+      "y": 24
+    },
+    {
+      "name": "Mizar",
+      "x": 86,
+      "y": 29
+    },
+    {
+      "name": "Alkaid",
+      "x": 100,
+      "y": 53
+    }
+  ],
+  "figures": [
+    "bear",
+    "plough",
+    "chariot",
+    "procession"
+  ],
+  "counts": [
+    3600,
+    1800
+  ],
+  "bounds": {
+    "minX": -31.1,
+    "minY": -19.4,
+    "maxX": 128.3,
+    "maxY": 72.9
+  },
+  "figureBounds": [
+    {
+      "minX": -28.7,
+      "minY": -8.3,
+      "maxX": 121.0,
+      "maxY": 65.4
+    },
+    {
+      "minX": -29.4,
+      "minY": -14.5,
+      "maxX": 113.1,
+      "maxY": 66.7
+    },
+    {
+      "minX": -31.1,
+      "minY": -19.4,
+      "maxX": 109.7,
+      "maxY": 68.8
+    },
+    {
+      "minX": -31.1,
+      "minY": -12.4,
+      "maxX": 128.3,
+      "maxY": 72.9
+    }
+  ]
+}

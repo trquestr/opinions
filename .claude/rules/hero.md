@@ -10,6 +10,9 @@ paths:
   `'use strict'`, globals `THREE`/`gsap`, and start immediately on load. Do not import them into React and do not insert
   `<script>` in JSX: the DOM they change breaks hydration. They are loaded only via
   `src/_pages/home/ui/landing-scripts.tsx`, in order, after hydration.
+- The night scene (承) is not a `public/js` module: it is TypeScript in `src/_pages/home/lib/night/`, started by the
+  client leaf `ui/night-scene-driver.tsx` via a dynamic import after hydration, so it is typed, linted and tested.
+  Its dot sources are baked by `scripts/bake_night.py`; re-run it after changing a figure or its star fit.
 - The hero markup is `src/_pages/home/ui/hero.tsx` (a server component), styles — `src/_pages/home/landing.css`.
   New UI around the hero — in Tailwind; `landing.css` — only for the hero.
 - Tailwind Preflight is already in effect: the `landing.css` rules are outside a layer and win over `@layer base`, but the properties

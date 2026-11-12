@@ -167,3 +167,48 @@ body {
     padding-left: 0.2em;
   }
 }
+
+/*
+ * Ночная сцена (承). Лендинг всегда в своей палитре и не участвует в темах сайта (решение владельца),
+ * поэтому цвета ночи заданы здесь, а не токенами: фон #0b0b0d и светлая «тушь» — Раскадровка.md, «Фон и материалы».
+ * Раскладку задают утилиты Tailwind в ui/night-scene.tsx.
+ */
+.night-stage {
+  background: #0b0b0d;
+  color: #ecece8;
+}
+
+.night-phrase {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+/*
+ * Фразы при фигурах (Н2–Н5) на широком экране стоят сбоку, напротив фигуры: её туда ставит камера ночи.
+ * Условие должно совпадать с SIDE_LAYOUT_QUERY в lib/night/camera.ts — иначе текст встанет на фигуру.
+ */
+@media (min-aspect-ratio: 6/5) {
+  .night-phrase[data-side] {
+    top: 50%;
+    bottom: auto;
+    width: 26%;
+    max-width: 20ch;
+    margin: 0;
+    translate: 0 -50%;
+    font-size: 1.875rem;
+    line-height: 1.25;
+  }
+
+  .night-phrase[data-side='left'] {
+    left: 7%;
+    right: auto;
+    text-align: left;
+  }
+
+  .night-phrase[data-side='right'] {
+    right: 7%;
+    left: auto;
+    text-align: right;
+  }
+}

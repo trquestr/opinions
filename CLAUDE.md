@@ -40,6 +40,7 @@ only by the owner's decision. The root `postinstall` builds the contracts.
 | `apps/web/app/` | Next routing only: thin re-exports from `src/` |
 | `apps/web/src/_app/` | Root layout, `styles/globals.css` (Tailwind, `@theme`, fonts), base metadata, robots, sitemap |
 | `apps/web/src/_pages/home/` | Landing: `ui/hero.tsx`, `ui/landing-scripts.tsx` (loads the hero modules after hydration), `landing.css` |
+| `apps/web/src/_pages/home/lib/night/` | Night scene (承) prototype in TypeScript: `timeline.ts` (frames Н1–Н9 as a pure function of scroll), `renderer.ts` + `shaders.ts` (WebGL2 ink, stars, lines), `scene.ts` (scroll, drawing, DOM); markup `ui/night-scene.tsx`, texts `model/night-script.ts` |
 | `apps/web/src/_pages/errors/` | Error, global error and 404 pages |
 | `apps/web/src/shared/lib/theme/`, `src/features/theme-switch/` | Two themes: pre-paint script, `applyTheme`/`useTheme`; switch (not placed yet) |
 | `apps/web/src/shared/` | `api` (serverApi / userServerApi / browserApi), `config` (zod env, site, security-headers), `ui`, `lib` |
@@ -52,6 +53,7 @@ only by the owner's decision. The root `postinstall` builds the contracts.
 | `deploy/` | Production: Dockerfiles in the apps, `docker-compose.prod.yml`, `Caddyfile`, `.env.example` |
 | `tsconfig.base.json` | Shared TypeScript strictness for all packages |
 | `scripts/build_final_untesis_font.py` | Build of the Untesis font (fonttools, skia-pathops) → `apps/web/public/assets/fonts/` |
+| `scripts/bake_night.py` | Bakes the night figures into dots fitted to the Big Dipper → `public/assets/night/points-*.bin` + `lib/night/night-manifest.json` |
 | `scripts/check.sh` | Quick checks in one command |
 
 ## Code rules

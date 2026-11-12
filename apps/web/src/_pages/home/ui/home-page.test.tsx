@@ -3,6 +3,8 @@ import { cleanup, render } from '@testing-library/react';
 
 // Загрузчик скриптов в этом тесте не нужен — проверяется разметка.
 vi.mock('./landing-scripts', () => ({ LandingScripts: () => null }));
+// Драйвер ночной сцены (WebGL) тоже клиентский — здесь проверяется только разметка.
+vi.mock('./night-scene-driver', () => ({ NightSceneDriver: () => null }));
 
 import { HomePage } from './home-page';
 
@@ -21,5 +23,10 @@ describe('HomePage', () => {
     for (const selector of ['#sculpture-section', '#hero-orbits', '#hero-arches', '#hero-scroll-down']) {
       expect(container.querySelector(selector)).toBeNull();
     }
+  });
+
+  it('рендерит секцию ночной сцены #night', () => {
+    const { container } = render(<HomePage />);
+    expect(container.querySelector('section#night')).not.toBeNull();
   });
 });

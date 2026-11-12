@@ -1314,6 +1314,9 @@
   function render(now) {
     frameId = 0;
     if (document.hidden || contextLost) return;
+    // Ниже полутора экранов слово уже ушло, а сцену закрывает непрозрачная ночь: не рисуем впустую,
+    // чтобы на телефоне не работали два WebGL-контекста разом. Скролл назад снова запросит кадр.
+    if ((window.scrollY || 0) > height * 1.5) return;
     const dt = Math.min(50, now - lastTime) || 16.667;
     lastTime = now;
     const s = dt / 16.667;
