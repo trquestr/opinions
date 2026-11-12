@@ -18,6 +18,7 @@ import {
 } from './camera';
 import { Cursor } from './cursor';
 import { CursorField } from './cursor-field';
+import { DetailsLayer } from './details-layer';
 import { createHaze, createOutline, loadFigures, pickInkCount } from './ink';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
@@ -76,6 +77,7 @@ export interface NightElements {
   readonly root: HTMLElement;
   readonly stage: HTMLElement;
   readonly canvas: HTMLCanvasElement;
+  readonly details: readonly HTMLImageElement[];
   readonly phrases: readonly HTMLElement[];
   readonly epilogue: HTMLElement;
 }
@@ -147,6 +149,7 @@ class NightScene {
   private readonly endB: Projected = { x: 0, y: 0, k: 0 };
   private readonly ends = { a: this.endA, b: this.endB };
   private readonly phraseOpacity: number[];
+  private readonly details: DetailsLayer;
   private renderer: NightRenderer | null;
   private frame: NightFrame = frameAt(-1);
   private view: Size = viewSize();
@@ -172,6 +175,7 @@ class NightScene {
 
   constructor(private readonly el: NightElements) {
     this.phraseOpacity = el.phrases.map(() => -1);
+    this.details = new DetailsLayer(el.details);
     this.renderer = createNightRenderer(el.canvas, { stars: this.stars.table });
     if (!this.renderer) el.canvas.hidden = true;
     this.ink.setState(HAZE, this.haze);
@@ -206,6 +210,8 @@ class NightScene {
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
         observer.disconnect();
+        // Гравюры качаются независимо от фигур: сбой одного не мешает другому
+        this.details.load();
         this.loadFigures().catch((error: unknown) => console.error(error));
       },
       { rootMargin: '100% 0px' },
@@ -259,6 +265,8 @@ class NightScene {
     const u = -this.el.root.getBoundingClientRect().top / this.view.height;
     this.frame = frameAt(u);
     this.applyDom();
+    // Без WebGL кадры не идут, а гравюры и тексты остаются: детали кладутся по скроллу
+    if (!this.renderer) this.updateDetails();
     if (u >= NIGHT_SCREENS && this.drawing.segments.length > 0) this.finishDrawing();
     this.scheduleRender();
   }
@@ -409,6 +417,7 @@ class NightScene {
     const isAnimating = this.updateInput(now);
     const isLooking = this.updateLook(now);
     const isCameraMoving = this.moveCamera(now);
+    this.updateDetails();
     this.writeSegments();
     this.updateSideFade(now);
     this.ink.step(this.inkStep, this.projector, this.grid);
@@ -420,6 +429,11 @@ class NightScene {
     this.renderer.uploadCursor(this.cursorField);
     this.renderer.render(this.input);
     if (isAnimating || isLooking || isCameraMoving || !this.inkStep.isReducedMotion) this.scheduleRender();
+  }
+
+  /** Гравюрные детали по текущей позе камеры (поза выставлена applyCamera) и кадру таймлайна. */
+  private updateDetails(): void {
+    this.details.update(this.projector, this.frame);
   }
 
   /** Сглаживает ракурс за курсором и отдаёт его камере. Возвращает, догоняет ли он ещё цель. */

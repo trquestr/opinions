@@ -1,39 +1,39 @@
 /**
- * Плавный инерционный скролл (smooth momentum scrolling) для страницы.
- * Превращает ступенчатые щелчки колёсика мыши в шелковистое ускорение и мягкое замедление с инерцией.
+ * Ступенчатый скролл колёсиком: один щелчок проигрывает целый «шаг сцены» — страница сама, по времени,
+ * доезжает до следующей остановки (позиции, где фраза и картинка полностью показаны).
  */
 
 export interface SmoothScrollOptions {
-  /** Коэффициент затухания инерции (1/с). Меньше = дольше катится по инерции. */
-  readonly damping?: number;
-  /** Чувствительность к колёсику мыши. */
-  readonly multiplier?: number;
+  /** Абсолютные позиции остановок (px), отсортированные по возрастанию. Читается в момент каждого шага. */
+  readonly getStops: () => readonly number[];
 }
 
-const DEFAULT_DAMPING = 8.5;
-const DEFAULT_MULTIPLIER = 1.0;
+type Direction = 1 | -1;
+
+/** Длительность шага на один экран пути, мс. */
+const MS_PER_SCREEN = 2200;
+/** Короткий шаг не должен быть рывком. */
+const MIN_STEP_MS = 900;
+/** Длинный шаг не должен тянуться бесконечно. */
+const MAX_STEP_MS = 2400;
+/** Остановка ближе этого расстояния (px) считается той, на которой мы уже стоим. */
+const STOP_EPSILON_PX = 2;
+/**
+ * Тишина (мс) без колёсных событий в том же направлении, после которой новый щелчок снова запускает шаг.
+ * Пока тишины нет, это хвост инерции тачпада — его глотаем, иначе один жест прокрутит несколько шагов.
+ */
+const GESTURE_GAP_MS = 160;
 
 function isInsideScrollable(target: EventTarget | null): boolean {
   let el = target instanceof HTMLElement ? target : null;
   while (el && el !== document.body && el !== document.documentElement) {
-    const style = window.getComputedStyle(el);
-    const overflowY = style.overflowY;
+    const overflowY = window.getComputedStyle(el).overflowY;
     if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
       return true;
     }
     el = el.parentElement;
   }
   return false;
-}
-
-function normalizeDelta(e: WheelEvent): number {
-  let dy = e.deltaY;
-  if (e.deltaMode === 1) {
-    dy *= 24;
-  } else if (e.deltaMode === 2) {
-    dy *= window.innerHeight;
-  }
-  return dy;
 }
 
 function shouldSkipSmoothScroll(): boolean {
@@ -43,88 +43,113 @@ function shouldSkipSmoothScroll(): boolean {
   return isTouch || isReduced;
 }
 
-class SmoothScroller {
-  private targetY = 0;
-  private currentY = 0;
-  private isRunning = false;
-  private lastTime = 0;
-  private rafId = 0;
-  private readonly damping: number;
-  private readonly multiplier: number;
+/** События, которые остаются родными: зум, нулевая дельта, прокручиваемый блок под курсором. */
+function isNativeWheel(e: WheelEvent): boolean {
+  return e.ctrlKey || e.metaKey || e.deltaY === 0 || isInsideScrollable(e.target);
+}
 
-  constructor(options: SmoothScrollOptions) {
-    this.damping = options.damping ?? DEFAULT_DAMPING;
-    this.multiplier = options.multiplier ?? DEFAULT_MULTIPLIER;
-    this.targetY = window.scrollY || window.pageYOffset || 0;
-    this.currentY = this.targetY;
+/**
+ * Ближайшая остановка строго за `fromPx` (дальше чем на 2 px) в заданном направлении или null.
+ */
+export function nextStop(stops: readonly number[], fromPx: number, direction: Direction): number | null {
+  let best: number | null = null;
+  for (const stop of stops) {
+    const delta = (stop - fromPx) * direction;
+    if (delta <= STOP_EPSILON_PX) continue;
+    if (best === null || delta < (best - fromPx) * direction) best = stop;
   }
+  return best;
+}
+
+/** Длительность шага: пропорциональна пути, но в пределах [MIN_STEP_MS, MAX_STEP_MS]. */
+export function stepDurationMs(distancePx: number, viewportHeightPx: number): number {
+  const raw = (distancePx / Math.max(1, viewportHeightPx)) * MS_PER_SCREEN;
+  return Math.min(MAX_STEP_MS, Math.max(MIN_STEP_MS, raw));
+}
+
+/** easeInOutSine: 0.5 − 0.5·cos(π·p), мягкий разгон и торможение. */
+function ease(progress: number): number {
+  return 0.5 - 0.5 * Math.cos(Math.PI * progress);
+}
+
+class StepScroller {
+  private isAnimating = false;
+  private direction: Direction = 1;
+  private fromPx = 0;
+  private toPx = 0;
+  private startedAt = 0;
+  private durationMs = 0;
+  private rafId = 0;
+  private lastWheelAt = Number.NEGATIVE_INFINITY;
+  private lastWheelDirection: Direction = 1;
+
+  constructor(private readonly getStops: () => readonly number[]) {}
 
   start(): () => void {
     window.addEventListener('wheel', this.onWheel, { passive: false });
-    window.addEventListener('scroll', this.onScroll, { passive: true });
     window.addEventListener('touchstart', this.onTouchStart, { passive: true });
     return () => this.dispose();
   }
 
-  private readonly step = (now: number): void => {
-    if (!this.isRunning) return;
-    const dt = Math.min(0.08, Math.max(0.001, (now - this.lastTime) / 1000));
-    this.lastTime = now;
+  private beginStep(toPx: number, direction: Direction): void {
+    this.fromPx = window.scrollY;
+    this.toPx = toPx;
+    this.direction = direction;
+    this.startedAt = performance.now();
+    this.durationMs = stepDurationMs(Math.abs(toPx - this.fromPx), window.innerHeight);
+    if (!this.isAnimating) {
+      this.isAnimating = true;
+      this.rafId = requestAnimationFrame(this.frame);
+    }
+  }
 
-    const diff = this.targetY - this.currentY;
-    if (Math.abs(diff) < 0.4) {
-      this.currentY = this.targetY;
-      window.scrollTo(0, this.currentY);
-      this.isRunning = false;
+  private readonly frame = (now: number): void => {
+    if (!this.isAnimating) return;
+    const progress = Math.min(1, Math.max(0, (now - this.startedAt) / this.durationMs));
+    if (progress >= 1) {
+      window.scrollTo(0, this.toPx);
+      this.isAnimating = false;
       return;
     }
-
-    const factor = 1 - Math.exp(-this.damping * dt);
-    this.currentY += diff * factor;
-    window.scrollTo(0, this.currentY);
-    this.rafId = requestAnimationFrame(this.step);
+    window.scrollTo(0, this.fromPx + (this.toPx - this.fromPx) * ease(progress));
+    this.rafId = requestAnimationFrame(this.frame);
   };
+
+  /** Хвост жеста: то же направление и ещё не было тишины. */
+  private isGestureTail(direction: Direction, now: number): boolean {
+    return direction === this.lastWheelDirection && now - this.lastWheelAt < GESTURE_GAP_MS;
+  }
 
   private readonly onWheel = (e: WheelEvent): void => {
-    if (e.ctrlKey || e.metaKey || isInsideScrollable(e.target)) return;
+    if (isNativeWheel(e)) return;
+    const direction: Direction = e.deltaY > 0 ? 1 : -1;
+    const now = performance.now();
+    const target = nextStop(this.getStops(), window.scrollY, direction);
+    if (target === null && !this.isAnimating) return;
     e.preventDefault();
 
-    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    const dy = normalizeDelta(e) * this.multiplier;
-    this.targetY = Math.max(0, Math.min(maxScroll, this.targetY + dy));
-
-    if (!this.isRunning) {
-      this.isRunning = true;
-      this.lastTime = performance.now();
-      this.rafId = requestAnimationFrame(this.step);
-    }
-  };
-
-  private readonly onScroll = (): void => {
-    if (!this.isRunning) {
-      this.targetY = window.scrollY || window.pageYOffset || 0;
-      this.currentY = this.targetY;
-    }
+    const isSwallowed = this.isAnimating ? direction === this.direction : this.isGestureTail(direction, now);
+    const shouldStep = target !== null && !isSwallowed;
+    this.lastWheelAt = now;
+    this.lastWheelDirection = direction;
+    if (shouldStep) this.beginStep(target, direction);
   };
 
   private readonly onTouchStart = (): void => {
-    this.isRunning = false;
+    this.isAnimating = false;
     cancelAnimationFrame(this.rafId);
-    this.targetY = window.scrollY || window.pageYOffset || 0;
-    this.currentY = this.targetY;
   };
 
   private dispose(): void {
-    this.isRunning = false;
+    this.isAnimating = false;
     cancelAnimationFrame(this.rafId);
     window.removeEventListener('wheel', this.onWheel);
-    window.removeEventListener('scroll', this.onScroll);
     window.removeEventListener('touchstart', this.onTouchStart);
   }
 }
 
-export function startSmoothScroll(options: SmoothScrollOptions = {}): () => void {
+/** Включает ступенчатый скролл колёсиком; возвращает функцию отписки. */
+export function startSmoothScroll(options: SmoothScrollOptions): () => void {
   if (shouldSkipSmoothScroll()) return () => {};
-  const scroller = new SmoothScroller(options);
-  return scroller.start();
+  return new StepScroller(options.getStops).start();
 }

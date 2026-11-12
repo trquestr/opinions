@@ -48,15 +48,13 @@ export interface NightFrame {
   readonly stage: number;
   readonly backgroundStars: number;
   readonly dipperStars: number;
-  /** Детали неба у краёв: сфера, астролябия, атлас. */
+  /** Гравюры на небе: проступают в Н1 вслед за звёздами и больше не уходят. */
   readonly sky: number;
   /**
    * Какая фигура (состояние туши) сейчас должна стоять. Сама смена идёт по времени (ink-sim.ts):
    * скролл только выбирает цель, поэтому быстрое колесо не проматывает вихрь за доли секунды.
    */
   readonly figure: number;
-  /** Непрозрачность гравюрных деталей при каждой из фигур. */
-  readonly details: readonly number[];
   readonly outline: number;
   /** Приглашение: тусклые звёзды рядом с ковшом разгораются (Н9). */
   readonly invite: number;
@@ -85,29 +83,14 @@ function figureAt(u: number): number {
   return TRANSITIONS.findLast((tr) => tr.start <= u)?.to ?? FIRST_TRANSITION.from;
 }
 
-/** Деталь фигуры проступает после вихря и растворяется в начале следующего. */
-function detailOpacity(u: number, figure: number): number {
-  const enter = TRANSITIONS[figure];
-  const leave = TRANSITIONS[figure + 1];
-  if (!enter || !leave) return 0;
-  const shown = enter.start + enter.duration;
-  return Math.min(
-    ramp(u, shown, shown + PHRASE_FADE_SCREENS),
-    1 - ramp(u, leave.start, leave.start + PHRASE_FADE_SCREENS),
-  );
-}
-
-const FIGURE_INDICES = Array.from({ length: FIGURE_COUNT }, (_, i) => i);
-
 export function frameAt(u: number): NightFrame {
   return {
     stage: ramp(u, -DAY_TO_NIGHT_SCREENS, 0),
-    // Н1: сначала фоновые звёзды, потом семь ярких, потом детали у краёв
+    // Н1: сначала фоновые звёзды, потом семь ярких, потом гравюры на небе
     backgroundStars: ramp(u, 0, 0.3),
     dipperStars: ramp(u, 0.2, 0.5),
     sky: ramp(u, 0.3, 0.8),
     figure: figureAt(u),
-    details: FIGURE_INDICES.map((i) => detailOpacity(u, i)),
     outline: windowOpacity(u, OUTLINE_WINDOW),
     invite: ramp(u, DRAWING_START, DRAWING_START + 0.2),
     phrases: NIGHT_PHRASES.map((p) =>

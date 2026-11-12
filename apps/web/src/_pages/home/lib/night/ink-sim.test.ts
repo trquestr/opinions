@@ -578,6 +578,8 @@ describe('InkSimulation: объём вдоль луча героя', () => {
       targetZ: depthAt(20, 10),
       anchorX: ANCHOR,
       anchorY: ANCHOR,
+      skyYaw: 0,
+      skyPitch: 0,
     });
     return projector;
   }

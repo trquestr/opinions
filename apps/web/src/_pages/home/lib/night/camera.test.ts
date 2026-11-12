@@ -6,6 +6,7 @@ import {
   figureBounds,
   figureShot,
   figureSide,
+  figureSkyTurn,
   figureYaw,
   overviewShot,
 } from './camera';
@@ -182,7 +183,18 @@ describe('overviewShot', () => {
 const START: Shot = {
   key: 1,
   sway: 0,
-  pose: { yaw: 0, pitch: 0, distance: 100, targetX: 0, targetY: 0, targetZ: 0, anchorX: 400, anchorY: 300 },
+  pose: {
+    yaw: 0,
+    pitch: 0,
+    distance: 100,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    anchorX: 400,
+    anchorY: 300,
+    skyYaw: 0,
+    skyPitch: 0,
+  },
 };
 const TARGET: Shot = {
   key: 2,
@@ -196,6 +208,8 @@ const TARGET: Shot = {
     targetZ: 0,
     anchorX: 1000,
     anchorY: 500,
+    skyYaw: 0,
+    skyPitch: 0,
   },
 };
 const T0 = 1000;
@@ -311,7 +325,18 @@ describe('Camera', () => {
     const retarget: Shot = {
       key: 3,
       sway: 0,
-      pose: { yaw: 0, pitch: 0, distance: 50, targetX: 0, targetY: 0, targetZ: 0, anchorX: 0, anchorY: 0 },
+      pose: {
+        yaw: 0,
+        pitch: 0,
+        distance: 50,
+        targetX: 0,
+        targetY: 0,
+        targetZ: 0,
+        anchorX: 0,
+        anchorY: 0,
+        skyYaw: 0,
+        skyPitch: 0,
+      },
     };
 
     camera.aim(retarget, T0 + CAMERA_MS / 2);
@@ -435,5 +460,29 @@ describe('Camera: взгляд за курсором', () => {
     camera.update(0);
 
     expect(camera.current).toEqual(START.pose);
+  });
+});
+
+describe('figureSkyTurn', () => {
+  const DEGREE = Math.PI / 180;
+
+  it('у каждой из четырёх фигур свой угол неба: стороны по горизонтали, первые две — вверх, последние — вниз', () => {
+    expect(figureSkyTurn(1, 'left')).toEqual({ yaw: 4 * DEGREE, pitch: -8 * DEGREE });
+    expect(figureSkyTurn(2, 'right')).toEqual({ yaw: -4 * DEGREE, pitch: -8 * DEGREE });
+    expect(figureSkyTurn(3, 'left')).toEqual({ yaw: 4 * DEGREE, pitch: 8 * DEGREE });
+    expect(figureSkyTurn(4, 'right')).toEqual({ yaw: -4 * DEGREE, pitch: 8 * DEGREE });
+  });
+
+  it('кадр фигуры несёт её доворот неба, общий план — нулевой', () => {
+    const input = { view: { width: 1600, height: 900 }, focal: 1400, key: 1 };
+    const bounds = { minX: 0, minY: 0, maxX: 100, maxY: 60 };
+
+    const figure = figureShot(input, { state: 3, bounds, side: 'left' });
+    const overview = overviewShot(input, { scale: 4, originX: 100, originY: 50 });
+
+    expect(figure.pose.skyYaw).toBeCloseTo(4 * DEGREE);
+    expect(figure.pose.skyPitch).toBeCloseTo(8 * DEGREE);
+    expect(overview.pose.skyYaw).toBe(0);
+    expect(overview.pose.skyPitch).toBe(0);
   });
 });

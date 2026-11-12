@@ -16,6 +16,7 @@ const SCENE_HTML = `
     <p data-night-phrase>раз</p>
     <p data-night-phrase>два</p>
     <p data-night-epilogue>конец</p>
+    <img data-night-detail alt="" />
   </div>`;
 
 function mountRoot(html: string): HTMLElement {
@@ -51,6 +52,7 @@ describe('findNightElements', () => {
     expect(elements?.canvas.tagName).toBe('CANVAS');
     expect(elements?.epilogue.textContent).toBe('конец');
     expect(elements?.phrases.map((p) => p.textContent)).toEqual(['раз', 'два']);
+    expect(elements?.details).toHaveLength(1);
   });
 });
 

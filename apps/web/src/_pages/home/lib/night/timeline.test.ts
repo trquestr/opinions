@@ -83,9 +83,10 @@ describe('frameAt', () => {
     expect(frameAt(5.4).isDrawing).toBe(true);
   });
 
-  it('деталь медведицы скрыта в начале вихря и видна после него', () => {
-    expect(frameAt(0.8).details[0]).toBe(0);
-    expect(frameAt(1.3).details[0]).toBe(1);
+  it('гравюры на небе проступают в Н1 и дальше не уходят', () => {
+    expect(frameAt(0.3).sky).toBe(0);
+    expect(frameAt(0.8).sky).toBe(1);
+    expect(frameAt(6.4).sky).toBe(1);
   });
 
   it('одинаковый u даёт одинаковый кадр', () => {

@@ -14,6 +14,7 @@ export function findNightElements(root: HTMLElement | null): NightElements | nul
     stage,
     canvas,
     epilogue,
+    details: [...root.querySelectorAll<HTMLImageElement>('img[data-night-detail]')],
     phrases: [...root.querySelectorAll<HTMLElement>('[data-night-phrase]')],
   };
 }

@@ -48,6 +48,16 @@ function createRendererSpy() {
   };
 }
 
+/** Деталь по номеру в NIGHT_DETAILS. jsdom не грузит картинки: размеры задаются вручную (2:1). */
+function createDetailImage(index: number): HTMLImageElement {
+  const image = document.createElement('img');
+  image.dataset.index = String(index);
+  image.dataset.src = `/assets/night/details/test-${index}.webp`;
+  Object.defineProperty(image, 'naturalWidth', { value: 400, configurable: true });
+  Object.defineProperty(image, 'naturalHeight', { value: 200, configurable: true });
+  return image;
+}
+
 function buildElements(): NightElements {
   const root = document.createElement('section');
   const stage = document.createElement('div');
@@ -58,11 +68,12 @@ function buildElements(): NightElements {
     return element;
   });
   const epilogue = Object.assign(document.createElement('p'), { textContent: NIGHT_EPILOGUE });
-  stage.append(canvas, ...phrases, epilogue);
+  const details = [createDetailImage(0), createDetailImage(1)];
+  stage.append(...details, canvas, ...phrases, epilogue);
   root.append(stage);
   document.body.append(root);
   vi.spyOn(root, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect);
-  return { root, stage, canvas, phrases, epilogue };
+  return { root, stage, canvas, details, phrases, epilogue };
 }
 
 /** Ставит прокрутку так, чтобы сцена прошла u экранов, и шлёт scroll. */
@@ -650,6 +661,112 @@ describe('startNightScene: рисование в Н9', () => {
     scrollTo(6.6);
 
     expect(setState).not.toHaveBeenCalledWith(5, expect.anything());
+  });
+});
+
+describe('startNightScene: гравюрные детали', () => {
+  it('до начала сцены деталей не видно', () => {
+    const elements = buildElements();
+
+    start(elements);
+
+    expect(elements.details.every((image) => image.style.visibility !== 'visible')).toBe(true);
+  });
+
+  it('картинки не качаются, пока сцена далеко', () => {
+    const elements = buildElements();
+
+    start(elements);
+
+    expect(elements.details.every((image) => !image.getAttribute('src'))).toBe(true);
+  });
+
+  it('когда до сцены остаётся экран, ставит src картинок, даже если фигуры не загрузились', async () => {
+    mocks.loadFigures.mockRejectedValue(new Error('сеть'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const elements = buildElements();
+    start(elements);
+
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(elements.details.map((image) => image.getAttribute('src'))).toEqual([
+      '/assets/night/details/test-0.webp',
+      '/assets/night/details/test-1.webp',
+    ]);
+  });
+
+  it('повторное срабатывание наблюдателя не перезаписывает src', () => {
+    const elements = buildElements();
+    start(elements);
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    elements.details[0]?.setAttribute('src', '/changed.webp');
+
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+
+    expect(elements.details[0]?.getAttribute('src')).toBe('/changed.webp');
+  });
+
+  it('после Н1 детали видны и расставлены по экрану', () => {
+    const elements = buildElements();
+    start(elements);
+
+    scrollTo(1.25);
+    flushFrames();
+
+    const [first, second] = elements.details;
+    expect(first?.style.visibility).toBe('visible');
+    expect(first?.style.transform).toMatch(/^translate3d\(.+px, .+px, 0(px)?\)$/);
+    expect(first?.style.opacity).toBe('0.7');
+    expect(first?.style.getPropertyValue('--solid')).toBe('0.12');
+    expect(second?.style.visibility).toBe('visible');
+  });
+
+  it('при смене фигуры детали не гаснут: из кадра их выводит только поворот неба', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushFrames();
+
+    scrollTo(2.75);
+    flushFrames();
+
+    expect(elements.details[0]?.style.opacity).toBe('0.7');
+    expect(elements.details[0]?.style.visibility).toBe('visible');
+  });
+
+  it('при возврате к началу сцены детали прячутся', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushFrames();
+
+    scrollTo(0.1);
+    flushFrames();
+
+    expect(elements.details[0]?.style.visibility).toBe('hidden');
+  });
+
+  it('без WebGL детали всё равно проступают по скроллу', () => {
+    mocks.createNightRenderer.mockReturnValue(null);
+    const elements = buildElements();
+    start(elements);
+
+    scrollTo(1.25);
+
+    expect(elements.details[0]?.style.visibility).toBe('visible');
+    expect(elements.details[1]?.style.visibility).toBe('visible');
+  });
+
+  it('картинка без размеров (ещё не загружена) остаётся скрытой', () => {
+    mocks.createNightRenderer.mockReturnValue(null);
+    const elements = buildElements();
+    Object.defineProperty(elements.details[0], 'naturalHeight', { value: 0 });
+    start(elements);
+
+    scrollTo(1.25);
+
+    expect(elements.details[0]?.style.visibility).not.toBe('visible');
   });
 });
 

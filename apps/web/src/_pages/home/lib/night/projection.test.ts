@@ -19,6 +19,8 @@ const POSE: CameraPose = {
   targetZ: 0,
   anchorX: 400,
   anchorY: 300,
+  skyYaw: 0,
+  skyPitch: 0,
 };
 
 function createProjector(pose: Partial<CameraPose> = {}): Projector {
@@ -159,6 +161,27 @@ describe('Projector.projectSky', () => {
     const fullShift = projector.focal * Math.tan(0.3);
     expect(Math.abs(p.x - 400) / fullShift).toBeGreaterThan(0.3);
     expect(Math.abs(p.x - 400) / fullShift).toBeLessThan(0.37);
+  });
+
+  it('доворот неба вправо и вниз уводит направление «прямо» влево и вверх на f · tg(угол), ракурс не нужен', () => {
+    const projector = createProjector({ skyYaw: 0.1, skyPitch: 0.05 });
+
+    const p = projector.projectSky({ x: 0, y: 0, z: 1 }, emptyResult());
+
+    expect(p.x).toBeCloseTo(400 - (projector.focal * Math.tan(0.1)) / Math.cos(0.05), 6);
+    expect(p.y).toBeCloseTo(300 - projector.focal * Math.tan(0.05), 6);
+  });
+
+  it('доворот неба не двигает точки мира', () => {
+    const still = createProjector().project({ x: 10, y: 5, z: 0 }, emptyResult());
+
+    const turned = createProjector({ skyYaw: 0.3, skyPitch: 0.2 }).project(
+      { x: 10, y: 5, z: 0 },
+      emptyResult(),
+    );
+
+    expect(turned.x).toBe(still.x);
+    expect(turned.y).toBe(still.y);
   });
 
   it('поворот по рысканию сдвигает небо', () => {

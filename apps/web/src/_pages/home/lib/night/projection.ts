@@ -18,7 +18,9 @@ import { createRandom } from './stars';
  *
  * Небесная сфера (фоновые звёзды) — бесконечно далеко: на неё действует только поворот камеры, не сдвиг.
  * Звезда — направление u; после поворота u' = R·u, на экране C + f·(u'.x, u'.y)/u'.z (C — центр экрана).
- * Отсюда глубина: при повороте небо уходит целиком, а ковш смещается относительно него. Угол для неба — × SKY_FOLLOW.
+ * Отсюда глубина: при повороте небо уходит целиком, а ковш смещается относительно него. Угол для неба — × SKY_FOLLOW
+ * плюс собственный доворот неба из позы (skyYaw, skyPitch): ψ_неба = ψ·SKY_FOLLOW + skyYaw, θ_неба = θ·SKY_FOLLOW + skyPitch.
+ * Доворотом камера показывает у каждой фигуры свой участок неба (camera.ts), не меняя ракурса самой фигуры.
  */
 export const FOV_DEGREES = 35;
 /**
@@ -38,6 +40,9 @@ export interface CameraPose {
   targetZ: number;
   anchorX: number;
   anchorY: number;
+  /** Доворот небесной сферы сверх доли ракурса, рад: + вправо / вниз (в кадр входит небо правее / ниже). */
+  skyYaw: number;
+  skyPitch: number;
 }
 
 /** Точка мира или направление на небесной сфере. */
@@ -71,12 +76,14 @@ export class Projector {
     targetZ: 0,
     anchorX: 0,
     anchorY: 0,
+    skyYaw: 0,
+    skyPitch: 0,
   };
   private cosYaw = 1;
   private sinYaw = 0;
   private cosPitch = 1;
   private sinPitch = 0;
-  /** Поворот для небесной сферы — та же поза, но угол × SKY_FOLLOW. */
+  /** Поворот для небесной сферы — та же поза, но угол × SKY_FOLLOW плюс доворот неба. */
   private skyCosYaw = 1;
   private skySinYaw = 0;
   private skyCosPitch = 1;
@@ -96,10 +103,12 @@ export class Projector {
     this.sinYaw = Math.sin(pose.yaw);
     this.cosPitch = Math.cos(pose.pitch);
     this.sinPitch = Math.sin(pose.pitch);
-    this.skyCosYaw = Math.cos(pose.yaw * SKY_FOLLOW);
-    this.skySinYaw = Math.sin(pose.yaw * SKY_FOLLOW);
-    this.skyCosPitch = Math.cos(pose.pitch * SKY_FOLLOW);
-    this.skySinPitch = Math.sin(pose.pitch * SKY_FOLLOW);
+    const skyYaw = pose.yaw * SKY_FOLLOW + pose.skyYaw;
+    const skyPitch = pose.pitch * SKY_FOLLOW + pose.skyPitch;
+    this.skyCosYaw = Math.cos(skyYaw);
+    this.skySinYaw = Math.sin(skyYaw);
+    this.skyCosPitch = Math.cos(skyPitch);
+    this.skySinPitch = Math.sin(skyPitch);
   }
 
   /** Масштаб в точке взгляда (px на единицу): f / D (базовый масштаб кадра без z₂). */

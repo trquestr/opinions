@@ -16,6 +16,10 @@ import type { CameraPose } from './projection';
  *   стоянка: после прихода за 8 с D' = D / (1 + 0.035·h) и ψ' = ψ + 0.06·h рад (h = smoothstep(t/8 с)) —
  *            медленный наезд с облётом на 3.5°: параллакс ковша на фоне неба виден и когда фигура стоит.
  * Новая цель посреди хода — новый ход начинается с текущего ракурса — без рывка.
+ *
+ * Свой участок неба у каждой фигуры (решено владельцем 2026-11-12): двух ракурсов (фигура слева / справа) на четыре
+ * фигуры мало, поэтому небесная сфера дополнительно доворачивается — см. figureSkyTurn. Гравюры висят на небе
+ * постоянно (model/night-details.ts) и входят в кадр только при «своём» довороте. Сама фигура при этом не наклоняется.
  */
 export const SIDE_LAYOUT_QUERY = '(min-aspect-ratio: 6/5)';
 export const CAMERA_MS = 3200;
@@ -41,6 +45,15 @@ const SWAY_PITCH_PERIOD_S = 19;
  * 20° (владелец 2026-11-12: 38° по пропорции эскиза — слишком глубоко); ближний край ≈ в 1.25 раза выше дальнего.
  */
 const FIGURE_YAW_DEGREES = 20;
+/**
+ * Доворот неба в кадре фигуры. По горизонтали — в ту же сторону, что и ракурс (вместе с долей SKY_FOLLOW выходит
+ * около ±11°), по вертикали — вверх у первых двух фигур и вниз у двух последних. Так у четырёх фигур четыре разных
+ * участка неба: центры кадров расходятся на ~21° × 16° при поле зрения ~47° × 35°, и угол неба у каждой свой.
+ */
+const SKY_TURN_YAW_DEGREES = 4;
+const SKY_TURN_PITCH_DEGREES = 8;
+/** Фигуры с номером до этого смотрят в верхнюю половину неба, остальные — в нижнюю. */
+const LAST_UPPER_SKY_FIGURE = 2;
 
 export type Side = keyof typeof SIDE_CENTER_X;
 
@@ -56,6 +69,14 @@ export interface Shot {
 export function figureYaw(side: Side | null): number {
   if (side === null) return 0;
   return (side === 'left' ? 1 : -1) * FIGURE_YAW_DEGREES * DEGREE;
+}
+
+/** Доворот неба в кадре фигуры, рад: по горизонтали — по стороне, по вертикали — по номеру фигуры. */
+export function figureSkyTurn(state: number, side: Side): { readonly yaw: number; readonly pitch: number } {
+  return {
+    yaw: (side === 'left' ? 1 : -1) * SKY_TURN_YAW_DEGREES * DEGREE,
+    pitch: (state <= LAST_UPPER_SKY_FIGURE ? -1 : 1) * SKY_TURN_PITCH_DEGREES * DEGREE,
+  };
 }
 
 /** Сторона экрана, где стоит фигура состояния туши: напротив текста её фразы. null — фигуры нет (общий план). */
@@ -98,6 +119,8 @@ export function overviewShot(input: ShotInput, overview: Layout): Shot {
       targetZ: 0,
       anchorX,
       anchorY,
+      skyYaw: 0,
+      skyPitch: 0,
     },
   };
 }
@@ -117,6 +140,7 @@ export function figureShot(
   );
   const anchor = figureAnchor(view, figure.side);
   const yaw = figureYaw(figure.side);
+  const sky = figureSkyTurn(figure.state, figure.side);
   return {
     key,
     sway: 0,
@@ -129,6 +153,8 @@ export function figureShot(
       targetZ: 0,
       anchorX: anchor.x,
       anchorY: anchor.y,
+      skyYaw: sky.yaw,
+      skyPitch: sky.pitch,
     },
   };
 }
@@ -151,10 +177,23 @@ const POSE_KEYS = [
   'targetZ',
   'anchorX',
   'anchorY',
+  'skyYaw',
+  'skyPitch',
 ] as const;
 
 function emptyPose(): CameraPose {
-  return { yaw: 0, pitch: 0, distance: 1, targetX: 0, targetY: 0, targetZ: 0, anchorX: 0, anchorY: 0 };
+  return {
+    yaw: 0,
+    pitch: 0,
+    distance: 1,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+    anchorX: 0,
+    anchorY: 0,
+    skyYaw: 0,
+    skyPitch: 0,
+  };
 }
 
 function copyPose(target: CameraPose, source: Readonly<CameraPose>): void {

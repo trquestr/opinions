@@ -18,6 +18,8 @@ const POSE: CameraPose = {
   targetZ: 0,
   anchorX: 400,
   anchorY: 300,
+  skyYaw: 0,
+  skyPitch: 0,
 };
 
 function createProjector(pose: Partial<CameraPose> = {}): Projector {
