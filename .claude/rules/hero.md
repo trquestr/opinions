@@ -13,6 +13,10 @@ paths:
 - The night scene (承) is not a `public/js` module: it is TypeScript in `src/_pages/home/lib/night/`, started by the
   client leaf `ui/night-scene-driver.tsx` via a dynamic import after hydration, so it is typed, linted and tested.
   Its dot sources are baked by `scripts/bake_night.py`; re-run it after changing a figure or its star fit.
+- The clouds scene (起) is built the same way: TypeScript in `src/_pages/home/lib/clouds/`, started by
+  `ui/clouds-scene-driver.tsx`. Day turns into night there by the dusk veil (`dusk-veil.ts`), a canvas blended with
+  `mix-blend-mode: difference` that inverts everything under it — do not recolor the background or the ink for the
+  night separately. The night stars use the same light-ink color as the figures (owner's decision 2026-11-12).
 - The hero markup is `src/_pages/home/ui/hero.tsx` (a server component), styles — `src/_pages/home/landing.css`.
   New UI around the hero — in Tailwind; `landing.css` — only for the hero.
 - Tailwind Preflight is already in effect: the `landing.css` rules are outside a layer and win over `@layer base`, but the properties

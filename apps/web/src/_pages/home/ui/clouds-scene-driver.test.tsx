@@ -44,6 +44,29 @@ describe('CloudsSceneDriver', () => {
     expect(elements?.canvasFront).not.toBeNull();
   });
 
+  it('находит холст вуали сумерек', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div data-clouds-stage>
+        <canvas data-clouds-canvas></canvas>
+        <div data-cloud-id="c1"></div>
+        <canvas data-clouds-veil></canvas>
+      </div>
+    `;
+    expect(findCloudsElements(root)?.veil).toBeInstanceOf(HTMLCanvasElement);
+  });
+
+  it('вуаль — null, если её холста нет в разметке', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div data-clouds-stage>
+        <canvas data-clouds-canvas></canvas>
+        <div data-cloud-id="c1"></div>
+      </div>
+    `;
+    expect(findCloudsElements(root)?.veil).toBeNull();
+  });
+
   it('возвращает null, если разметка неполная', () => {
     const root = document.createElement('div');
     expect(findCloudsElements(root)).toBeNull();

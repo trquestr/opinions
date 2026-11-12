@@ -29,6 +29,17 @@ describe('CloudsScene', () => {
     expect(container.querySelector('canvas[data-clouds-canvas-front]')).not.toBeNull();
   });
 
+  it('рендерит холст вуали сумерек последним в сцене с режимом difference', () => {
+    const { container } = render(<CloudsScene />);
+    const stage = container.querySelector('[data-clouds-stage]');
+    const veil = container.querySelector('canvas[data-clouds-veil]');
+
+    expect(veil).not.toBeNull();
+    expect(stage?.lastElementChild).toBe(veil);
+    expect(veil?.getAttribute('aria-hidden')).toBe('true');
+    expect(veil?.classList.contains('mix-blend-difference')).toBe(true);
+  });
+
   it('содержит 3D-эшелоны облаков', () => {
     const { container } = render(<CloudsScene />);
     expect(container.querySelectorAll('[data-cloud-id]')).toHaveLength(CLOUDS_FORMATION.length);

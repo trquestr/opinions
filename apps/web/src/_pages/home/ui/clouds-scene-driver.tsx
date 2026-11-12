@@ -18,6 +18,7 @@ export function findCloudsElements(root: HTMLElement | null): CloudsElements | n
     canvas,
     canvasBack,
     canvasFront,
+    veil: root.querySelector<HTMLCanvasElement>('canvas[data-clouds-veil]'),
     cloudItems: [...root.querySelectorAll<HTMLElement>('[data-cloud-id]')],
     phrases: [...root.querySelectorAll<HTMLElement>('[data-clouds-phrase]')],
     glCanvas: document.getElementById('gl-canvas'),

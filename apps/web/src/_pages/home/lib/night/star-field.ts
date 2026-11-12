@@ -1,10 +1,17 @@
 import { createSkyDirections, depthAt, DIPPER_DEPTHS } from './projection';
-import { buildStarTable, createRandom, DIPPER_CENTER, DIPPER_STARS, INVITE_STARS, STAR_STRIDE } from './stars';
+import {
+  buildStarTable,
+  createRandom,
+  DIPPER_CENTER,
+  DIPPER_STARS,
+  INVITE_STARS,
+  STAR_STRIDE,
+} from './stars';
 import type { Point } from './layout';
 import type { Projected, Projector } from './projection';
 
 /*
- * Звёзды в 3D. Облик (размер, яркость, голубизна, лучи) — из stars.ts, положение — в мире.
+ * Звёзды в 3D. Облик (размер, яркость, тон, лучи) — из stars.ts, положение — в мире.
  * Глубину сцене дают слои, которые при облёте камеры смещаются с разной скоростью (параллакс):
  *   небо      — 60% фоновых звёзд на небесной сфере, бесконечно далеко: двигаются только от поворота камеры;
  *   глубина   — 40% фоновых звёзд на конечной дальности, z ∈ [300, 1800] единиц за ковшом: отстают от неба;
@@ -40,7 +47,11 @@ function rowAt(index: number): number {
 /** Точка слоя в пределах видимой области на глубине z (с запасом на облёт камеры). */
 function spreadAt(random: () => number, z: number): readonly [number, number, number] {
   const reach = TYPICAL_DISTANCE + z;
-  return [DIPPER_CENTER.x + (random() * 2 - 1) * 0.62 * reach, DIPPER_CENTER.y + (random() * 2 - 1) * 0.4 * reach, z];
+  return [
+    DIPPER_CENTER.x + (random() * 2 - 1) * 0.62 * reach,
+    DIPPER_CENTER.y + (random() * 2 - 1) * 0.4 * reach,
+    z,
+  ];
 }
 
 /** Фоновые звёзды из stars.ts: первые SKY_SHARE — на небе, остальные — на конечной дальности. */
@@ -82,7 +93,12 @@ export class StarField {
     // Тусклые звёзды — около поля глубины ковша, но каждая на своей глубине (±10): висят в объёме, а не в плоскости
     const invite = INVITE_STARS.map((s, i) => ({
       world: [s.x, s.y, depthAt(s.x, s.y) + (random() * 2 - 1) * INVITE_DEPTH_SPREAD] as const,
-      look: Array.from(base.slice(rowAt(backgroundCount + DIPPER_STARS.length + i), rowAt(backgroundCount + DIPPER_STARS.length + i + 1))),
+      look: Array.from(
+        base.slice(
+          rowAt(backgroundCount + DIPPER_STARS.length + i),
+          rowAt(backgroundCount + DIPPER_STARS.length + i + 1),
+        ),
+      ),
       mode: MODE.dipper,
     }));
     // Порядок важен: звёзды для рисования — в конце (drawablePoint считает от firstDrawable)

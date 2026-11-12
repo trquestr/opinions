@@ -1,11 +1,12 @@
 import { CLOUDS_FORMATION } from '../lib/clouds/clouds-formation';
 import { CLOUDS_PHRASES } from '../model/clouds-script';
 import { CloudsSceneDriver } from './clouds-scene-driver';
+import { RevealText } from './reveal-text';
 
 /**
  * Сцена «Облака» (起) — 3 экрана скролла (Раскадровка.md, О1–О6).
  * Тексты рендерятся на сервере в семантическом HTML для SEO и читалок экрана.
- * 3D-пролёт сквозь облака и влёт в чашу буквы U поднимаются через CloudsSceneDriver.
+ * Влёт в чашу буквы U, подъём сквозь облака и вуаль сумерек поднимаются через CloudsSceneDriver.
  */
 export function CloudsScene() {
   return (
@@ -22,7 +23,7 @@ export function CloudsScene() {
           className="pointer-events-none absolute inset-0 z-10 block h-full w-full"
         />
 
-        {/* 3D-эшелоны облаков: расходятся радиально от центра по вектору пролёта */}
+        {/* Эшелоны облаков: камера поднимается, облака уходят от зенита вниз и в стороны */}
         {CLOUDS_FORMATION.map((cloud) => (
           <div
             key={cloud.id}
@@ -54,9 +55,16 @@ export function CloudsScene() {
             data-clouds-phrase
             className="clouds-phrase absolute inset-x-4 bottom-[14%] z-40 mx-auto max-w-[28ch] text-center text-xl leading-snug opacity-0 sm:text-2xl"
           >
-            {phrase.text}
+            <RevealText text={phrase.text} />
           </p>
         ))}
+
+        {/* Вуаль сумерек (О6): пунктир опускается сверху и инвертирует всё под собой — так день сменяется ночью */}
+        <canvas
+          data-clouds-veil
+          aria-hidden="true"
+          className="pointer-events-none invisible absolute inset-0 z-50 block h-full w-full mix-blend-difference"
+        />
       </div>
 
       <CloudsSceneDriver rootId="clouds" />

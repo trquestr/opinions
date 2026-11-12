@@ -11,8 +11,11 @@ export const FIGURE_COUNT = 4;
 /** Длина сцены и хвост после неё, в экранах: в хвосте последний кадр стоит (дальше будет 転). */
 export const NIGHT_SCREENS = 6.5;
 export const TRACK_SCREENS = 7;
-/** Смена дня на ночь — временная заглушка О6, пока сцены 起 нет. */
-const DAY_TO_NIGHT_SCREENS = 0.5;
+/**
+ * Ночная сцена проступает в самом конце 起: к этому моменту вуаль сумерек уже закрыла весь лист
+ * (VEIL_END в lib/clouds/timeline.ts = 2,88 экрана из 3), и светлая пыль вуали переходит в дымку туши.
+ */
+const DAY_TO_NIGHT_SCREENS = 0.12;
 /** Фразы проступают и уходят за 0,1 экрана. */
 export const PHRASE_FADE_SCREENS = 0.1;
 /** С этого экрана зрителю можно провести своё созвездие (Н9), до конца сцены. */
@@ -39,7 +42,6 @@ const TRANSITIONS: readonly Transition[] = [
 
 /** Привычный контур ковша (Н8): проступает и гаснет. */
 const OUTLINE_WINDOW = { from: 5.0, to: 5.4, fade: 0.12 } as const;
-
 
 export interface NightFrame {
   /** Непрозрачность всей сцены (переход от дня к ночи). */
@@ -89,7 +91,10 @@ function detailOpacity(u: number, figure: number): number {
   const leave = TRANSITIONS[figure + 1];
   if (!enter || !leave) return 0;
   const shown = enter.start + enter.duration;
-  return Math.min(ramp(u, shown, shown + PHRASE_FADE_SCREENS), 1 - ramp(u, leave.start, leave.start + PHRASE_FADE_SCREENS));
+  return Math.min(
+    ramp(u, shown, shown + PHRASE_FADE_SCREENS),
+    1 - ramp(u, leave.start, leave.start + PHRASE_FADE_SCREENS),
+  );
 }
 
 const FIGURE_INDICES = Array.from({ length: FIGURE_COUNT }, (_, i) => i);
@@ -105,7 +110,9 @@ export function frameAt(u: number): NightFrame {
     details: FIGURE_INDICES.map((i) => detailOpacity(u, i)),
     outline: windowOpacity(u, OUTLINE_WINDOW),
     invite: ramp(u, DRAWING_START, DRAWING_START + 0.2),
-    phrases: NIGHT_PHRASES.map((p) => windowOpacity(u, { from: p.from, to: p.to, fade: PHRASE_FADE_SCREENS })),
+    phrases: NIGHT_PHRASES.map((p) =>
+      windowOpacity(u, { from: p.from, to: p.to, fade: PHRASE_FADE_SCREENS }),
+    ),
     isDrawing: u >= DRAWING_START,
   };
 }

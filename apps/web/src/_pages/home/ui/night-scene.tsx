@@ -1,5 +1,6 @@
 import { NIGHT_EPILOGUE, NIGHT_PHRASES } from '../model/night-script';
 import { NightSceneDriver } from './night-scene-driver';
+import { RevealText } from './reveal-text';
 
 // Ночная сцена (承). Тексты — настоящий HTML с сервера (видны поисковикам и читалкам экрана); туша, звёзды и рисование —
 // на клиенте (NightSceneDriver). data-атрибуты — контракт с lib/night/scene.ts.
@@ -7,8 +8,8 @@ import { NightSceneDriver } from './night-scene-driver';
 // сама сцена закреплена на весь экран и до прихода скролла прозрачна.
 export function NightScene() {
   return (
-    <section id="night" aria-label="Ночь" className="relative h-[800vh] h-[800svh]">
-      <div data-night-stage className="night-stage invisible fixed inset-0 z-[60] opacity-0 touch-pan-y">
+    <section id="night" aria-label="Ночь" className="relative h-[800svh] h-[800vh]">
+      <div data-night-stage className="night-stage invisible fixed inset-0 z-[60] touch-pan-y opacity-0">
         <canvas data-night-canvas aria-hidden="true" className="absolute inset-0 block h-full w-full" />
         {NIGHT_PHRASES.map((phrase) =>
           phrase.isMain ? (
@@ -17,7 +18,7 @@ export function NightScene() {
               data-night-phrase
               className="night-phrase absolute inset-x-4 top-1/2 mx-auto max-w-[22ch] -translate-y-1/2 text-center text-3xl leading-tight opacity-0 sm:text-5xl"
             >
-              {phrase.text}
+              <RevealText text={phrase.text} />
             </h2>
           ) : (
             <p
@@ -26,7 +27,7 @@ export function NightScene() {
               data-side={phrase.side}
               className="night-phrase absolute inset-x-4 bottom-[14%] mx-auto max-w-[28ch] text-center text-xl leading-snug opacity-0 sm:text-2xl"
             >
-              {phrase.text}
+              <RevealText text={phrase.text} />
             </p>
           ),
         )}
@@ -34,7 +35,7 @@ export function NightScene() {
           data-night-epilogue
           className="night-phrase absolute inset-x-4 bottom-[14%] mx-auto max-w-[28ch] text-center text-xl leading-snug opacity-0 transition-opacity duration-1000 sm:text-2xl"
         >
-          {NIGHT_EPILOGUE}
+          <RevealText text={NIGHT_EPILOGUE} />
         </p>
       </div>
       <NightSceneDriver rootId="night" />

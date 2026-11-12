@@ -49,9 +49,9 @@ describe('CloudsRenderer', () => {
     expect(canvas.height).toBe(1200);
 
     const sim = new CloudsSimulation({ count: 20, isSmallScreen: false });
-    expect(() => renderer?.render(sim, 0.5)).not.toThrow();
-    expect(() => renderer?.render(sim.back, 0.5)).not.toThrow();
-    expect(() => renderer?.render(sim.front, 0.5)).not.toThrow();
+    expect(() => renderer?.render(sim)).not.toThrow();
+    expect(() => renderer?.render(sim.back)).not.toThrow();
+    expect(() => renderer?.render(sim.front)).not.toThrow();
 
     renderer?.dispose();
   });

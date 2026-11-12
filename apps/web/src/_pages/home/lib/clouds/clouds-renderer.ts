@@ -1,4 +1,5 @@
 import type { CloudsSimulation, ParticleSlice } from './clouds-sim';
+import { buildProgram } from './gl-program';
 
 const VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec2 aPosition;
@@ -42,8 +43,6 @@ in float vStretch;
 in float vRadiusPx;
 in float vPointSize;
 
-uniform float uInkLightness;
-
 out vec4 fragColor;
 
 // Формула sdDroplet из landing.js (флюидный курсор-метабол)
@@ -76,46 +75,13 @@ void main() {
 
   float alpha = ink * vAlpha;
 
-  // Цвет туши: от чёрной (день) к светлой (ночь)
-  vec3 blackInk = vec3(0.07, 0.07, 0.08);
-  vec3 whiteInk = vec3(0.92, 0.92, 0.91);
-  vec3 color = mix(blackInk, whiteInk, uInkLightness);
+  // Тушь всегда чёрная: светлой её делает вуаль сумерек (dusk-veil.ts), которая инвертирует всё под собой
+  vec3 color = vec3(0.07, 0.07, 0.08);
 
   // Premultiplied alpha
   fragColor = vec4(color * alpha, alpha);
 }
 `;
-
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
-  const shader = gl.createShader(type);
-  if (!shader) throw new Error('Не удалось создать шейдер');
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const info = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Ошибка компиляции шейдера: ${info}`);
-  }
-  return shader;
-}
-
-function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
-  const program = gl.createProgram();
-  if (!program) throw new Error('Не удалось создать программу');
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const info = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Ошибка линковки программы: ${info}`);
-  }
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  return program;
-}
 
 interface Buffers {
   readonly vao: WebGLVertexArrayObject | null;
@@ -162,21 +128,19 @@ export type ParticleSource = ParticleSlice | CloudsSimulation;
 
 export interface CloudsRenderer {
   resize(width: number, height: number, dpr: number): void;
-  render(source: ParticleSource, inkLightness: number): void;
+  render(source: ParticleSource): void;
   dispose(): void;
 }
 
 interface UniformLocations {
   readonly uRes: WebGLUniformLocation | null;
   readonly uDpr: WebGLUniformLocation | null;
-  readonly uInkLightness: WebGLUniformLocation | null;
 }
 
 function getUniformLocations(gl: WebGL2RenderingContext, program: WebGLProgram): UniformLocations {
   return {
     uRes: gl.getUniformLocation(program, 'uResolution'),
     uDpr: gl.getUniformLocation(program, 'uDpr'),
-    uInkLightness: gl.getUniformLocation(program, 'uInkLightness'),
   };
 }
 
@@ -202,10 +166,7 @@ function fillPositions(
   return target;
 }
 
-function fillDirs(
-  source: ParticleSource,
-  dirArray: Float32Array<ArrayBuffer>,
-): Float32Array<ArrayBuffer> {
+function fillDirs(source: ParticleSource, dirArray: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
   const target = dirArray.length === source.count * 2 ? dirArray : new Float32Array(source.count * 2);
   for (let i = 0; i < source.count; i++) {
     target[i * 2] = source.dirX[i] ?? 1;
@@ -234,7 +195,7 @@ export function createCloudsRenderer(canvas: HTMLCanvasElement): CloudsRenderer 
 
   let program: WebGLProgram | null = null;
   try {
-    program = createProgram(gl);
+    program = buildProgram(gl, { vertex: VERTEX_SHADER, fragment: FRAGMENT_SHADER });
   } catch (err) {
     console.error('Ошибка инициализации WebGL2 для облаков', err);
     return null;
@@ -262,7 +223,7 @@ export function createCloudsRenderer(canvas: HTMLCanvasElement): CloudsRenderer 
       gl.viewport(0, 0, canvas.width, canvas.height);
     },
 
-    render(source: ParticleSource, inkLightness: number): void {
+    render(source: ParticleSource): void {
       if (!program) return;
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -282,7 +243,6 @@ export function createCloudsRenderer(canvas: HTMLCanvasElement): CloudsRenderer 
       gl.useProgram(program);
       gl.uniform2f(u.uRes, width, height);
       gl.uniform1f(u.uDpr, dpr);
-      gl.uniform1f(u.uInkLightness, inkLightness);
       gl.drawArrays(gl.POINTS, 0, source.count);
     },
 

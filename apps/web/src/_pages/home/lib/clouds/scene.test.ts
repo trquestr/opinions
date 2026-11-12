@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CloudsScene, startCloudsScene, type CloudsElements } from './scene';
+import { createDuskVeil, VEIL_FALLBACK_COLOR, type DuskVeil } from './dusk-veil';
+import { VEIL_END, VEIL_START } from './timeline';
+
+// По умолчанию вуаль настоящая (в jsdom нет WebGL, значит вернёт null); отдельные тесты подменяют её на заглушку.
+vi.mock('./dusk-veil', async (importOriginal) => {
+  const original = await importOriginal<{ createDuskVeil: typeof createDuskVeil }>();
+  return { ...original, createDuskVeil: vi.fn(original.createDuskVeil) };
+});
 
 function createMockElements(): CloudsElements {
   const root = document.createElement('section');
   const stage = document.createElement('div');
   const canvasBack = document.createElement('canvas');
   const canvasFront = document.createElement('canvas');
+  const veil = document.createElement('canvas');
   const cloud1 = document.createElement('div');
   const cloud2 = document.createElement('div');
   const phrase1 = document.createElement('p');
@@ -25,6 +34,7 @@ function createMockElements(): CloudsElements {
   stage.appendChild(phrase2);
   stage.appendChild(phrase3);
   stage.appendChild(phrase4);
+  stage.appendChild(veil);
   document.body.appendChild(root);
   document.body.appendChild(glCanvas);
   document.body.appendChild(wordmark);
@@ -36,6 +46,7 @@ function createMockElements(): CloudsElements {
     canvas: canvasFront,
     canvasBack,
     canvasFront,
+    veil,
     cloudItems: [cloud1, cloud2],
     phrases: [phrase1, phrase2, phrase3, phrase4],
     glCanvas,
@@ -121,7 +132,34 @@ describe('CloudsScene', () => {
 
     // Фраза 2 (индекс 2, "Кажется, они поднимаются снизу —") активна в 1.3..1.8
     expect(Number(elements.phrases[2]?.style.opacity)).toBeGreaterThan(0.5);
+    // Активная фраза помечена для проявления букв, остальные — нет
+    expect(elements.phrases[2]?.dataset.shown).toBe('true');
+    expect(elements.phrases[0]?.dataset.shown).toBe('false');
 
+    stop();
+  });
+
+  it('передаёт зум слова в WebGL-хук, если он уже зарегистрирован', () => {
+    const setZoom = vi.fn();
+    window.__setWordmarkCameraZoom = setZoom;
+    const stop = startCloudsScene(elements);
+
+    expect(setZoom).toHaveBeenCalled();
+    stop();
+    delete window.__setWordmarkCameraZoom;
+  });
+
+  it('реагирует на скролл страницы и на смену размера окна без ошибок', () => {
+    const stop = startCloudsScene(elements);
+
+    window.scrollTo = vi.fn();
+    Object.defineProperty(window, 'scrollY', { value: 300, configurable: true });
+    expect(() => {
+      window.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('resize'));
+    }).not.toThrow();
+
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
     stop();
   });
 
@@ -133,5 +171,148 @@ describe('CloudsScene', () => {
     document.dispatchEvent(new Event('mouseleave'));
 
     stop();
+  });
+
+  describe('вуаль сумерек', () => {
+    /** Ставит скролл на u экранов сцены и прокручивает один кадр анимации. */
+    function scrollToScreens(u: number): void {
+      vi.spyOn(elements.root, 'getBoundingClientRect').mockReturnValue({
+        top: -window.innerHeight * u,
+        bottom: window.innerHeight * (3 - u),
+        left: 0,
+        right: window.innerWidth,
+        width: window.innerWidth,
+        height: window.innerHeight * 3,
+        x: 0,
+        y: -window.innerHeight * u,
+        toJSON: () => ({}),
+      });
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(16);
+    }
+
+    function createFakeVeil(): DuskVeil {
+      return { resize: vi.fn(), render: vi.fn(), dispose: vi.fn() };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('без WebGL закрашивает холст вуали запасным цветом', () => {
+      const stop = startCloudsScene(elements);
+
+      expect(elements.veil?.style.backgroundColor).toBe('rgb(244, 244, 242)');
+      expect(VEIL_FALLBACK_COLOR).toBe('rgb(244, 244, 242)');
+      stop();
+    });
+
+    it('до VEIL_START вуаль скрыта', () => {
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens(VEIL_START - 0.1);
+
+      expect(elements.veil?.style.visibility).toBe('hidden');
+      stop();
+    });
+
+    it('в запасном режиме во время вуали холст виден и проявляется по ходу вуали', () => {
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens((VEIL_START + VEIL_END) / 2);
+
+      expect(elements.veil?.style.visibility).toBe('visible');
+      expect(elements.veil?.style.opacity).toBe('0.5');
+      stop();
+    });
+
+    it('после окончания вуали запасный холст полностью непрозрачен', () => {
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens(VEIL_END + 0.05);
+
+      expect(elements.veil?.style.opacity).toBe('1');
+      stop();
+    });
+
+    it('при возврате вверх вуаль снова скрывается', () => {
+      const stop = startCloudsScene(elements);
+      scrollToScreens(VEIL_END);
+
+      scrollToScreens(1);
+
+      expect(elements.veil?.style.visibility).toBe('hidden');
+      stop();
+    });
+
+    it('за пределами сцены вуаль скрыта, даже если ход вуали ненулевой', () => {
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens(-1);
+
+      expect(elements.veil?.style.visibility).toBe('hidden');
+      stop();
+    });
+
+    it('с рабочей вуалью рисует её шейдером и не красит холст запасным цветом', () => {
+      const veil = createFakeVeil();
+      vi.mocked(createDuskVeil).mockReturnValueOnce(veil);
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens((VEIL_START + VEIL_END) / 2);
+
+      expect(veil.render).toHaveBeenCalled();
+      expect(veil.resize).toHaveBeenCalled();
+      expect(elements.veil?.style.backgroundColor).toBe('');
+      stop();
+      expect(veil.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('при prefers-reduced-motion вуаль получает нулевое время', () => {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })),
+      );
+      const veil = createFakeVeil();
+      vi.mocked(createDuskVeil).mockReturnValueOnce(veil);
+      const stop = startCloudsScene(elements);
+
+      scrollToScreens((VEIL_START + VEIL_END) / 2);
+
+      expect(veil.render).toHaveBeenLastCalledWith(expect.closeTo(0.5, 5), 0);
+      stop();
+    });
+
+    it('при потере контекста переходит на запасную заливку и перестаёт рисовать шейдером', () => {
+      const veil = createFakeVeil();
+      let onContextLost = (): void => undefined;
+      vi.mocked(createDuskVeil).mockImplementationOnce((_canvas, options) => {
+        onContextLost = options.onContextLost;
+        return veil;
+      });
+      const stop = startCloudsScene(elements);
+      scrollToScreens((VEIL_START + VEIL_END) / 2);
+      vi.mocked(veil.render).mockClear();
+
+      onContextLost();
+      scrollToScreens((VEIL_START + VEIL_END) / 2 + 0.1);
+
+      expect(elements.veil?.style.backgroundColor).toBe('rgb(244, 244, 242)');
+      expect(veil.render).not.toHaveBeenCalled();
+      expect(elements.veil?.style.opacity).not.toBe('');
+      stop();
+    });
+
+    it('работает без холста вуали в разметке', () => {
+      const withoutVeil: CloudsElements = { ...elements, veil: null };
+      const stop = startCloudsScene(withoutVeil);
+
+      expect(() => scrollToScreens(VEIL_END)).not.toThrow();
+      stop();
+    });
   });
 });

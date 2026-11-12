@@ -7,7 +7,15 @@ import {
   pressStar,
   releaseAnchor,
 } from './drawing';
-import { Camera, figureBounds, figureShot, figureSide, figureYaw, overviewShot, SIDE_LAYOUT_QUERY } from './camera';
+import {
+  Camera,
+  figureBounds,
+  figureShot,
+  figureSide,
+  figureYaw,
+  overviewShot,
+  SIDE_LAYOUT_QUERY,
+} from './camera';
 import { Cursor } from './cursor';
 import { CursorField } from './cursor-field';
 import { createHaze, createOutline, loadFigures, pickInkCount } from './ink';
@@ -77,7 +85,11 @@ function viewSize(): Size {
 }
 
 /** Пишет отрезок (экранные px) в массив, укороченный на LINE_GAP_PX с обоих концов. Без аллокаций. */
-function writeSegment(target: Float32Array, index: number, ends: { readonly a: Point; readonly b: Point }): void {
+function writeSegment(
+  target: Float32Array,
+  index: number,
+  ends: { readonly a: Point; readonly b: Point },
+): void {
   const { a, b } = ends;
   const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
   const gap = Math.min(LINE_GAP_PX, length / 3) / length;
@@ -260,6 +272,7 @@ class NightScene {
     // Эпилог стоит на месте приглашения «Проведи своё.» и сменяет его; выше Н9 его нет
     const hasEpilogue = this.isEpilogueDue && this.frame.isDrawing;
     epilogue.style.opacity = hasEpilogue ? '1' : '0';
+    epilogue.dataset.shown = hasEpilogue ? 'true' : 'false';
     this.applyPhrases(hasEpilogue);
   }
 
@@ -273,6 +286,8 @@ class NightScene {
       if (!phrase || this.phraseOpacity[i] === opacity) return;
       this.phraseOpacity[i] = opacity;
       phrase.style.opacity = String(opacity);
+      // Буквы проявляются из расфокуса по времени (landing.css): скролл только включает фразу
+      phrase.dataset.shown = opacity > 0 ? 'true' : 'false';
     });
   }
 
@@ -359,7 +374,8 @@ class NightScene {
     for (const [a, b] of DIPPER_OUTLINE) count = this.addSegment(count, a, b);
     for (const [a, b] of this.drawing.segments) count = this.addSegment(count, a, b);
     const { anchor } = this.drawing;
-    if (anchor !== null && this.pointer && count < MAX_LINE_SEGMENTS) count = this.addSegment(count, anchor, null);
+    if (anchor !== null && this.pointer && count < MAX_LINE_SEGMENTS)
+      count = this.addSegment(count, anchor, null);
     this.input.outlineCount = DIPPER_OUTLINE.length;
     this.input.segmentCount = count;
     this.input.segmentsDirty = true;

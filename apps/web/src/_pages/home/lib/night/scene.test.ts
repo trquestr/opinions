@@ -38,7 +38,14 @@ let observerCallback: IntersectionObserverCallback | null = null;
 let stop: (() => void) | null = null;
 
 function createRendererSpy() {
-  return { resize: vi.fn(), uploadStars: vi.fn(), uploadInk: vi.fn(), uploadCursor: vi.fn(), render: vi.fn(), dispose: vi.fn() };
+  return {
+    resize: vi.fn(),
+    uploadStars: vi.fn(),
+    uploadInk: vi.fn(),
+    uploadCursor: vi.fn(),
+    render: vi.fn(),
+    dispose: vi.fn(),
+  };
 }
 
 function buildElements(): NightElements {
@@ -78,7 +85,10 @@ function flushAt(nowMs: number): void {
 
 /** matchMedia: совпадают только запросы, в тексте которых есть одна из подстрок. */
 function stubMedia(...matching: string[]): void {
-  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: matching.some((part) => query.includes(part)) })));
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({ matches: matching.some((part) => query.includes(part)) })),
+  );
 }
 
 /** Экранное положение звезды для рисования: берём из живой таблицы звёзд, которую сцена отдала рендереру. */
@@ -90,7 +100,9 @@ function starPoint(index: number): { x: number; y: number } {
 
 function pressStar(elements: NightElements, index: number): void {
   const point = starPoint(index);
-  elements.stage.dispatchEvent(new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }));
+  elements.stage.dispatchEvent(
+    new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }),
+  );
 }
 
 function start(elements: NightElements) {
@@ -115,10 +127,18 @@ beforeEach(() => {
   setPose = spyOnSetPose();
   stepSpy = spyOnStep();
   mocks.createNightRenderer.mockReturnValue(spy);
-  mocks.loadFigures.mockResolvedValue([new Int16Array(3), new Int16Array(6), new Int16Array(9), new Int16Array(12)]);
+  mocks.loadFigures.mockResolvedValue([
+    new Int16Array(3),
+    new Int16Array(6),
+    new Int16Array(9),
+    new Int16Array(12),
+  ]);
   vi.stubGlobal('innerWidth', VIEW.width);
   vi.stubGlobal('innerHeight', VIEW.height);
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({ matches: false })),
+  );
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frameQueue.push(callback));
   vi.stubGlobal('cancelAnimationFrame', () => {
     frameQueue = [];
@@ -165,13 +185,34 @@ describe('startNightScene: DOM по скроллу', () => {
     expect(elements.stage.style.visibility).toBe('visible');
   });
 
+  it('проявление букв включено только у активной фразы', () => {
+    const elements = buildElements();
+    start(elements);
+
+    scrollTo(0.5);
+
+    expect(elements.phrases[0]?.dataset.shown).toBe('true');
+    expect(elements.phrases[1]?.dataset.shown).toBe('false');
+    expect(elements.epilogue.dataset.shown).toBe('false');
+  });
+
   it('видна только активная фраза', () => {
     const elements = buildElements();
     start(elements);
 
     scrollTo(0.5);
 
-    expect(elements.phrases.map((phrase) => phrase.style.opacity)).toEqual(['1', '0', '0', '0', '0', '0', '0', '0', '0']);
+    expect(elements.phrases.map((phrase) => phrase.style.opacity)).toEqual([
+      '1',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+      '0',
+    ]);
   });
 
   it('после скролла рисует кадр', () => {
@@ -214,7 +255,10 @@ describe('startNightScene: DOM по скроллу', () => {
   });
 
   it('при prefers-reduced-motion время звёзд стоит на нуле', () => {
-    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })));
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })),
+    );
     start(buildElements());
 
     scrollTo(0.5);
@@ -248,7 +292,10 @@ describe('startNightScene: DOM по скроллу', () => {
   });
 
   it('при prefers-reduced-motion после кадра покой: следующий кадр не просит', () => {
-    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })));
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })),
+    );
     const elements = buildElements();
     start(elements);
     scrollTo(0.5);
@@ -303,7 +350,12 @@ describe('startNightScene: загрузка фигур', () => {
     observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect([1, 2, 3, 4].map((index) => setState.mock.calls.some((args) => args[0] === index))).toEqual([true, true, true, true]);
+    expect([1, 2, 3, 4].map((index) => setState.mock.calls.some((args) => args[0] === index))).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 
   it('пока сцена далеко, фигуры не грузятся', () => {
@@ -390,7 +442,10 @@ describe('startNightScene: рисование в Н9', () => {
   });
 
   it('при prefers-reduced-motion волну не пускает', () => {
-    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })));
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })),
+    );
     const click = vi.spyOn(Cursor.prototype, 'click');
     const elements = buildElements();
     start(elements);
@@ -413,7 +468,10 @@ describe('startNightScene: рисование в Н9', () => {
   });
 
   it('при prefers-reduced-motion поле курсора щелчок не получает', () => {
-    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })));
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({ matches: query.includes('prefers-reduced-motion') })),
+    );
     const click = vi.spyOn(CursorField.prototype, 'click');
     const elements = buildElements();
     start(elements);
@@ -429,8 +487,12 @@ describe('startNightScene: рисование в Н9', () => {
     start(buildElements());
     scrollTo(0.5);
 
-    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }), { pointerType: 'mouse' }));
-    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: 60, clientY: 70 }), { pointerType: 'touch' }));
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }), { pointerType: 'mouse' }),
+    );
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: 60, clientY: 70 }), { pointerType: 'touch' }),
+    );
 
     expect(move).toHaveBeenCalledTimes(1);
     expect(move).toHaveBeenCalledWith(40, 50);
@@ -480,14 +542,19 @@ describe('startNightScene: рисование в Н9', () => {
     scrollTo(5.5);
     const press = (index: number) => {
       const point = starPoint(index);
-      const event = Object.assign(new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }), {
-        pointerType: 'mouse',
-      });
+      const event = Object.assign(
+        new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }),
+        {
+          pointerType: 'mouse',
+        },
+      );
       elements.stage.dispatchEvent(event);
     };
 
     press(0);
-    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: 500, clientY: 400 }), { pointerType: 'mouse' }));
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: 500, clientY: 400 }), { pointerType: 'mouse' }),
+    );
     press(1);
     vi.advanceTimersByTime(FINISH_IDLE_MS);
 
@@ -534,6 +601,9 @@ describe('startNightScene: рисование в Н9', () => {
     expect(before).toBe('0');
     expect(elements.epilogue.style.opacity).toBe('1');
     expect(elements.phrases.at(-1)?.style.opacity).toBe('0');
+    // Эпилог проявляется по буквам, приглашение — гаснет
+    expect(elements.epilogue.dataset.shown).toBe('true');
+    expect(elements.phrases.at(-1)?.dataset.shown).toBe('false');
   });
 
   it('прокрутка выше Н9 прячет эпилог', () => {
@@ -744,7 +814,9 @@ describe('startNightScene: курсор и экран', () => {
     const move = vi.spyOn(Cursor.prototype, 'move');
     start(buildElements());
 
-    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }), { pointerType: 'mouse' }));
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }), { pointerType: 'mouse' }),
+    );
 
     expect(move).not.toHaveBeenCalled();
   });
@@ -773,7 +845,9 @@ describe('startNightScene: взгляд за курсором', () => {
   const DEGREE = Math.PI / 180;
 
   function mouseMove(x: number, y: number, pointerType = 'mouse'): void {
-    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: x, clientY: y }), { pointerType }));
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: x, clientY: y }), { pointerType }),
+    );
   }
 
   /** Серия кадров с шагом 50 мс — взгляд успевает догнать цель. */

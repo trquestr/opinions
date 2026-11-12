@@ -1,6 +1,7 @@
 import { CLOUDS_FORMATION, projectCloud } from './clouds-formation';
 import { CloudsSimulation } from './clouds-sim';
 import { createCloudsRenderer, type CloudsRenderer } from './clouds-renderer';
+import { createDuskVeil, VEIL_FALLBACK_COLOR, type DuskVeil } from './dusk-veil';
 import { frameAt, type CloudsFrame } from './timeline';
 import { computeWordmarkCameraZoom } from './wordmark-zoom';
 
@@ -10,6 +11,8 @@ export interface CloudsElements {
   readonly canvas: HTMLCanvasElement;
   readonly canvasBack?: HTMLCanvasElement | null;
   readonly canvasFront?: HTMLCanvasElement | null;
+  /** Холст вуали сумерек: лежит поверх сцены и инвертирует её (mix-blend-mode: difference). */
+  readonly veil?: HTMLCanvasElement | null;
   readonly cloudItems: readonly HTMLElement[];
   readonly phrases: readonly HTMLElement[];
   readonly glCanvas: HTMLElement | null;
@@ -18,10 +21,18 @@ export interface CloudsElements {
 }
 
 const SMALL_SCREEN_QUERY = '(max-width: 767px), (pointer: coarse)';
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
-/** Подбирает количество частиц: сильно уменьшено под эстетику аккуратных капель туши (14 на десктопе, 7 на мобильных). */
+function matchesMedia(query: string): boolean {
+  return typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false;
+}
+
+/**
+ * Количество капель туши. В О2–О3 в кадре их треть (аккуратная горсть), к О5 поднимаются все:
+ * 44 на компьютере, 20 на телефоне.
+ */
 function pickDropCount(isSmallScreen: boolean): number {
-  return isSmallScreen ? 7 : 14;
+  return isSmallScreen ? 20 : 44;
 }
 
 interface Renderers {
@@ -46,7 +57,9 @@ export class CloudsScene {
   private readonly sim: CloudsSimulation;
   private rendererBack: CloudsRenderer | null = null;
   private rendererFront: CloudsRenderer | null = null;
+  private veil: DuskVeil | null = null;
   private readonly isSmallScreen: boolean;
+  private readonly isReducedMotion: boolean;
   private readonly cursor = { x: -9999, y: -9999, isInside: false };
   private frame: CloudsFrame = frameAt(-1);
   private lastTimeMs = 0;
@@ -58,8 +71,8 @@ export class CloudsScene {
   private isDestroyed = false;
 
   constructor(private readonly el: CloudsElements) {
-    this.isSmallScreen =
-      typeof window.matchMedia === 'function' ? window.matchMedia(SMALL_SCREEN_QUERY).matches : false;
+    this.isSmallScreen = matchesMedia(SMALL_SCREEN_QUERY);
+    this.isReducedMotion = matchesMedia(REDUCED_MOTION_QUERY);
     this.sim = new CloudsSimulation({
       count: pickDropCount(this.isSmallScreen),
       isSmallScreen: this.isSmallScreen,
@@ -67,7 +80,21 @@ export class CloudsScene {
     const { back, front } = initRenderers(el);
     this.rendererBack = back;
     this.rendererFront = front;
+    this.initVeil();
   }
+
+  /** Без WebGL и после потери контекста холст вуали работает ровной заливкой: та же инверсия, но без пунктира. */
+  private initVeil(): void {
+    const canvas = this.el.veil;
+    if (!canvas) return;
+    this.veil = createDuskVeil(canvas, { onContextLost: this.onVeilLost });
+    if (!this.veil) canvas.style.backgroundColor = VEIL_FALLBACK_COLOR;
+  }
+
+  private readonly onVeilLost = (): void => {
+    this.veil = null;
+    if (this.el.veil) this.el.veil.style.backgroundColor = VEIL_FALLBACK_COLOR;
+  };
 
   start(): () => void {
     this.handleResize();
@@ -119,16 +146,31 @@ export class CloudsScene {
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.rendererBack?.resize(this.width, this.height, this.dpr);
     this.rendererFront?.resize(this.width, this.height, this.dpr);
+    this.veil?.resize(this.width, this.height, this.dpr);
     this.onScroll();
   }
 
   private renderParticles(): void {
-    const lightness = this.frame.inkLightness;
     if (this.rendererBack && this.rendererFront) {
-      this.rendererBack.render(this.sim.back, lightness);
-      this.rendererFront.render(this.sim.front, lightness);
+      this.rendererBack.render(this.sim.back);
+      this.rendererFront.render(this.sim.front);
     } else {
-      this.rendererFront?.render(this.sim, lightness);
+      this.rendererFront?.render(this.sim);
+    }
+  }
+
+  /** Вуаль сумерек: пунктир рисует шейдер; в запасном режиме холст просто проявляется ровной заливкой. */
+  private renderVeil(nowMs: number): void {
+    const canvas = this.el.veil;
+    if (!canvas) return;
+    const progress = this.frame.stage > 0 ? this.frame.veil : 0;
+    const visibility = progress > 0 ? 'visible' : 'hidden';
+    if (canvas.style.visibility !== visibility) canvas.style.visibility = visibility;
+    if (progress <= 0) return;
+    if (this.veil) {
+      this.veil.render(progress, this.isReducedMotion ? 0 : nowMs / 1000);
+    } else {
+      canvas.style.opacity = progress.toFixed(3);
     }
   }
 
@@ -143,6 +185,7 @@ export class CloudsScene {
       this.sim.step(dt, this.frame, { cursor: this.cursor, width: this.width, height: this.height });
       this.renderParticles();
     }
+    this.renderVeil(nowMs);
 
     this.frameId = requestAnimationFrame(this.onFrame);
   };
@@ -166,13 +209,6 @@ export class CloudsScene {
     }
     stage.style.opacity = '1';
 
-    // Цвет фона: от чисто-белого #ffffff к ночному #0b0b0d (О6)
-    const dark = f.bgDarkness;
-    const r = Math.round(255 * (1 - dark) + 11 * dark);
-    const g = Math.round(255 * (1 - dark) + 11 * dark);
-    const b = Math.round(255 * (1 - dark) + 13 * dark);
-    stage.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-
     this.update3DClouds(f);
 
     // Фразы рассказа (Georgia, нижняя треть)
@@ -181,7 +217,9 @@ export class CloudsScene {
       if (!phraseEl) continue;
       const opacity = f.phrases[i] ?? 0;
       phraseEl.style.opacity = opacity.toFixed(3);
-      phraseEl.style.color = dark > 0.5 ? '#ecece8' : '#111112';
+      // Буквы проявляются из расфокуса по времени (landing.css): скролл только включает фразу
+      const shown = opacity > 0 ? 'true' : 'false';
+      if (phraseEl.dataset.shown !== shown) phraseEl.dataset.shown = shown;
     }
   }
 
@@ -258,6 +296,8 @@ export class CloudsScene {
     }
     this.rendererBack?.dispose();
     this.rendererFront?.dispose();
+    this.veil?.dispose();
+    this.veil = null;
     this.rendererBack = null;
     this.rendererFront = null;
   }

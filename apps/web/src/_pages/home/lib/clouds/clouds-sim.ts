@@ -1,5 +1,4 @@
 import type { CloudsFrame } from './timeline';
-import { computeUBowlCenter } from './wordmark-zoom';
 
 export interface CursorState {
   readonly x: number;
@@ -18,62 +17,6 @@ export interface SimOptions {
   readonly isSmallScreen: boolean;
 }
 
-const DRAG_COEFFICIENT = 2.8; // Коэффициент затухания инерции (1/с)
-const SCROLL_IMPULSE_FACTOR = 3.6; // Множитель рывка от скорости скролла
-const REPULSION_RADIUS_PX = 90;
-const REPULSION_FORCE = 320;
-
-interface StepEnv {
-  readonly cx: number;
-  readonly cy: number;
-  readonly dt: number;
-  readonly dragDecay: number;
-  readonly ctx: SimContext;
-  readonly frame: CloudsFrame;
-}
-
-interface ParticlePos {
-  readonly x: number;
-  readonly y: number;
-}
-
-/** Отклоняет каплю туши от курсора мыши при наведении. */
-function applyCursorRepulsion(pos: ParticlePos, cursor: CursorState, dt: number): ParticlePos {
-  if (!cursor.isInside) return pos;
-  const dx = pos.x - cursor.x;
-  const dy = pos.y - cursor.y;
-  const d = Math.hypot(dx, dy);
-  if (d < REPULSION_RADIUS_PX && d > 1) {
-    const force = (1 - d / REPULSION_RADIUS_PX) * REPULSION_FORCE * dt;
-    return { x: pos.x + (dx / d) * force, y: pos.y + (dy / d) * force };
-  }
-  return pos;
-}
-
-interface ParticleVelocity {
-  readonly vx: number;
-  readonly vy: number;
-  readonly speed: number;
-}
-
-function computeParticleDir(ang: number, v: ParticleVelocity): { dx: number; dy: number } {
-  if (v.speed > 4.0) {
-    const vLen = Math.hypot(v.vx, v.vy) || 1;
-    return { dx: v.vx / vLen, dy: v.vy / vLen };
-  }
-  const rawX = Math.cos(ang);
-  const rawY = Math.sin(ang) * 0.78;
-  const dLen = Math.hypot(rawX, rawY) || 1;
-  return { dx: rawX / dLen, dy: rawY / dLen };
-}
-
-function updateStretchValue(current: number, crawlSpeed: number, dt: number): number {
-  const targetStretch = Math.min(1.2, crawlSpeed / 200);
-  const sEase = 1 - Math.pow(0.5, dt * 60);
-  const next = current + (targetStretch - current) * sEase;
-  return next < 0.005 ? 0 : next;
-}
-
 export interface ParticleSlice {
   readonly count: number;
   readonly x: Float32Array;
@@ -85,10 +28,59 @@ export interface ParticleSlice {
   readonly stretch: Float32Array;
 }
 
+/** Затухание рывка от скролла, 1/с: v = v·exp(−k·dt). */
+const DRAG_COEFFICIENT = 2.8;
+/** Рывок: скорость капель (px/с) на пиксель прокрутки. */
+const SCROLL_IMPULSE_FACTOR = 3.6;
+const MAX_IMPULSE_SPEED = 1800;
+/** Курсор расталкивает капли в этом радиусе; сдвиг возвращается к нулю с затуханием OFFSET_DECAY (1/с). */
+const REPULSION_RADIUS_PX = 110;
+const REPULSION_SPEED = 620;
+const OFFSET_DECAY = 2.2;
+/** Капля появляется и исчезает за краем экрана и проступает на первых FADE_PX пути. */
+const EDGE_MARGIN_PX = 48;
+const FADE_PX = 70;
+/** Доля капель дальнего плана (под облаками): они мельче и медленнее. */
+const BACK_SHARE = 0.42;
+/** Капля включается по своей очереди плавно, на этом отрезке доли капель. */
+const RANK_FADE = 0.08;
+
+function sliceOf(arrays: ParticleSlice, from: number, to: number): ParticleSlice {
+  return {
+    count: to - from,
+    x: arrays.x.subarray(from, to),
+    y: arrays.y.subarray(from, to),
+    radius: arrays.radius.subarray(from, to),
+    alpha: arrays.alpha.subarray(from, to),
+    dirX: arrays.dirX.subarray(from, to),
+    dirY: arrays.dirY.subarray(from, to),
+    stretch: arrays.stretch.subarray(from, to),
+  };
+}
+
+function wrap01(value: number): number {
+  return value - Math.floor(value);
+}
+
+interface StepEnv {
+  readonly dt: number;
+  readonly ctx: SimContext;
+  readonly frame: CloudsFrame;
+  /** Высота пути капли: экран плюс поля за краями. */
+  readonly travelPx: number;
+  readonly offsetDecay: number;
+}
+
 /**
- * Радиальная симуляция капель туши (разлёт из центра с разной скоростью, рывком и инерцией).
+ * Капли туши поднимаются снизу вверх (мотив сцены: мысли поднимаются снизу).
+ *
+ * Каждая капля идёт по своей дорожке lane (доля ширины) и хранит место на пути travel ∈ [0, 1): 0 — под нижним
+ * краем, 1 — над верхним. Скорость вверх (px/с):
+ *   v = base·rise + impulse·factor
+ * base — своя скорость всплытия, rise — множитель из таймлайна; impulse — общий рывок от скролла со знаком
+ * (скролл назад ведёт капли вниз), затухает как exp(−DRAG·dt). Дойдя до края, капля входит с другого на новой дорожке.
  * Память выделяется один раз во Float32Array (без аллокаций в rAF).
- * Частицы разделены на эшелон ПОД облаками (back) и эшелон НАД облаками (front).
+ * Капли разделены на эшелон ПОД облаками (back) и эшелон НАД облаками (front).
  */
 export class CloudsSimulation {
   readonly count: number;
@@ -104,17 +96,23 @@ export class CloudsSimulation {
   readonly dirY: Float32Array;
   readonly stretch: Float32Array;
 
-  // Радиальные координаты и динамика
-  private readonly angle: Float32Array;
-  private readonly dist: Float32Array;
-  private readonly radialV: Float32Array;
+  private readonly lane: Float32Array;
+  private readonly travel: Float32Array;
+  private readonly baseSpeed: Float32Array;
   private readonly speedFactor: Float32Array;
-  private readonly baseRadius: Float32Array;
-  private readonly maxDist: Float32Array;
+  private readonly swayAmp: Float32Array;
+  private readonly swayFreq: Float32Array;
+  private readonly swayPhase: Float32Array;
+  private readonly offsetX: Float32Array;
+  private readonly offsetY: Float32Array;
+  /** Очередь включения: капля видна, когда доля капель кадра больше её rank. */
+  private readonly rank: Float32Array;
+  private impulse = 0;
+  private timeSeconds = 0;
 
   constructor(options: SimOptions) {
     this.count = options.count;
-    this.backCount = Math.floor(this.count * 0.42);
+    this.backCount = Math.floor(this.count * BACK_SHARE);
     this.frontCount = this.count - this.backCount;
 
     this.x = new Float32Array(this.count);
@@ -124,163 +122,125 @@ export class CloudsSimulation {
     this.dirX = new Float32Array(this.count);
     this.dirY = new Float32Array(this.count);
     this.stretch = new Float32Array(this.count);
+    this.back = sliceOf(this, 0, this.backCount);
+    this.front = sliceOf(this, this.backCount, this.count);
 
-    this.back = {
-      count: this.backCount,
-      x: this.x.subarray(0, this.backCount),
-      y: this.y.subarray(0, this.backCount),
-      radius: this.radius.subarray(0, this.backCount),
-      alpha: this.alpha.subarray(0, this.backCount),
-      dirX: this.dirX.subarray(0, this.backCount),
-      dirY: this.dirY.subarray(0, this.backCount),
-      stretch: this.stretch.subarray(0, this.backCount),
-    };
-    this.front = {
-      count: this.frontCount,
-      x: this.x.subarray(this.backCount, this.count),
-      y: this.y.subarray(this.backCount, this.count),
-      radius: this.radius.subarray(this.backCount, this.count),
-      alpha: this.alpha.subarray(this.backCount, this.count),
-      dirX: this.dirX.subarray(this.backCount, this.count),
-      dirY: this.dirY.subarray(this.backCount, this.count),
-      stretch: this.stretch.subarray(this.backCount, this.count),
-    };
-
-    this.angle = new Float32Array(this.count);
-    this.dist = new Float32Array(this.count);
-    this.radialV = new Float32Array(this.count);
+    this.lane = new Float32Array(this.count);
+    this.travel = new Float32Array(this.count);
+    this.baseSpeed = new Float32Array(this.count);
     this.speedFactor = new Float32Array(this.count);
-    this.baseRadius = new Float32Array(this.count);
-    this.maxDist = new Float32Array(this.count);
+    this.swayAmp = new Float32Array(this.count);
+    this.swayFreq = new Float32Array(this.count);
+    this.swayPhase = new Float32Array(this.count);
+    this.offsetX = new Float32Array(this.count);
+    this.offsetY = new Float32Array(this.count);
+    this.rank = new Float32Array(this.count);
 
-    this.initParticles();
-  }
-
-  private initParticles(): void {
     for (let i = 0; i < this.count; i++) {
-      this.resetParticle(i, 0.15 + (i / this.count) * 0.70);
+      this.initParticle(i);
     }
   }
 
-  /**
-   * Сбрасывает частицу в центр (или на случайное начальное расстояние при старте).
-   */
-  private resetParticle(i: number, initialProgress = 0): void {
-    this.angle[i] = Math.random() * Math.PI * 2;
+  private initParticle(i: number): void {
     const isBack = i < this.backCount;
-    this.speedFactor[i] = isBack ? 0.45 + Math.random() * 1.6 : 0.6 + Math.random() * 2.0;
-    this.baseRadius[i] = isBack ? 1.2 + Math.random() * 1.5 : 1.8 + Math.random() * 2.2;
-    this.maxDist[i] = 450 + Math.random() * 450;
-    this.dist[i] = initialProgress * (this.maxDist[i] ?? 600);
-    this.radialV[i] = 0;
-    this.alpha[i] = 0;
-    this.x[i] = 0;
-    this.y[i] = 0;
-    this.dirX[i] = Math.cos(this.angle[i] ?? 0);
-    this.dirY[i] = Math.sin(this.angle[i] ?? 0);
-    this.stretch[i] = 0;
+    const groupStart = isBack ? 0 : this.backCount;
+    const groupCount = isBack ? this.backCount : this.frontCount;
+    // Очередь внутри своего эшелона: при любой доле капель оба плана заполнены поровну
+    this.rank[i] = ((i - groupStart) / Math.max(1, groupCount)) * (1 - RANK_FADE);
+    this.lane[i] = Math.random();
+    this.travel[i] = Math.random();
+    this.baseSpeed[i] = isBack ? 18 + Math.random() * 32 : 30 + Math.random() * 60;
+    this.speedFactor[i] = isBack ? 0.45 + Math.random() * 0.9 : 0.8 + Math.random() * 1.4;
+    this.radius[i] = isBack ? 1.2 + Math.random() * 1.5 : 1.8 + Math.random() * 2.4;
+    this.swayAmp[i] = 6 + Math.random() * 16;
+    this.swayFreq[i] = 0.25 + Math.random() * 0.5;
+    this.swayPhase[i] = Math.random() * Math.PI * 2;
+    this.dirX[i] = 0;
+    this.dirY[i] = -1;
   }
 
-  /**
-   * Передаёт импульс от скролла («рывок»): частицы получают радиальное ускорение наружу,
-   * пропорциональное скорости прокрутки и индивидуальному фактору скорости.
-   */
+  /** Рывок от скролла: вниз по странице — капли вверх, назад — вниз. */
   addScrollImpulse(deltaScrollPx: number): void {
-    const impulse = Math.min(1400, Math.abs(deltaScrollPx) * SCROLL_IMPULSE_FACTOR);
-    for (let i = 0; i < this.count; i++) {
-      const speed = this.speedFactor[i] ?? 1;
-      const currentV = this.radialV[i] ?? 0;
-      this.radialV[i] = Math.min(2200, currentV + impulse * speed);
-    }
+    const next = this.impulse + deltaScrollPx * SCROLL_IMPULSE_FACTOR;
+    this.impulse = Math.min(MAX_IMPULSE_SPEED, Math.max(-MAX_IMPULSE_SPEED, next));
   }
 
-  /**
-   * Шаг физики за время dt:
-   * 1) инерция затухает по закону v = v * exp(-drag * dt);
-   * 2) радиус растёт только от скорости импульса: r += v * dt (в покое частицы стоят);
-   * 3) частицы, вылетевшие за край экрана, возрождаются в центре.
-   */
   step(dt: number, frame: CloudsFrame, ctx: SimContext): void {
     if (frame.stage <= 0) {
       this.alpha.fill(0);
       return;
     }
+    this.timeSeconds += dt;
+    this.impulse *= Math.exp(-DRAG_COEFFICIENT * dt);
+    if (Math.abs(this.impulse) < 0.1) this.impulse = 0;
 
-    const { cx, cy } = this.computeCenterOrigin(frame, ctx);
-    const dragDecay = Math.exp(-DRAG_COEFFICIENT * dt);
-    const env: StepEnv = { cx, cy, dt, dragDecay, ctx, frame };
-
+    const env: StepEnv = {
+      dt,
+      ctx,
+      frame,
+      travelPx: ctx.height + EDGE_MARGIN_PX * 2,
+      offsetDecay: Math.exp(-OFFSET_DECAY * dt),
+    };
     for (let i = 0; i < this.count; i++) {
       this.stepParticle(i, env);
     }
   }
 
-  private computeCenterOrigin(frame: CloudsFrame, ctx: SimContext): { cx: number; cy: number } {
-    if (frame.u <= 0.55) {
-      const bowl = computeUBowlCenter(ctx.width, ctx.height);
-      const p = Math.min(1, Math.max(0, frame.u / 0.5));
-      return {
-        cx: bowl.x + (ctx.width * 0.5 - bowl.x) * p,
-        cy: bowl.y + (ctx.height * 0.5 - bowl.y) * p,
-      };
+  /** Двигает каплю по пути и возвращает её скорость вверх, px/с. */
+  private advance(i: number, env: StepEnv): number {
+    const speed = (this.baseSpeed[i] ?? 0) * env.frame.rise + this.impulse * (this.speedFactor[i] ?? 1);
+    const next = (this.travel[i] ?? 0) + (speed * env.dt) / env.travelPx;
+    if (next < 0 || next >= 1) {
+      this.lane[i] = Math.random();
+      this.offsetX[i] = 0;
+      this.offsetY[i] = 0;
     }
-    return {
-      cx: ctx.width * 0.5,
-      cy: ctx.height * 0.48,
-    };
+    this.travel[i] = wrap01(next);
+    return speed;
   }
 
-  private advanceRadialDistance(i: number, dt: number, dragDecay: number): number {
-    const currentV = (this.radialV[i] ?? 0) * dragDecay;
-    this.radialV[i] = currentV < 0.1 ? 0 : currentV;
-    let r = (this.dist[i] ?? 0) + this.radialV[i] * dt;
-    const maxR = this.maxDist[i] ?? 650;
-    if (r >= maxR) {
-      this.resetParticle(i, 0.05);
-      r = this.dist[i] ?? 20;
+  /** Курсор отталкивает каплю; накопленный сдвиг плавно возвращается к нулю. */
+  private repel(i: number, env: StepEnv): void {
+    const { cursor } = env.ctx;
+    const dx = (this.x[i] ?? 0) - cursor.x;
+    const dy = (this.y[i] ?? 0) - cursor.y;
+    const distance = Math.hypot(dx, dy);
+    if (cursor.isInside && distance < REPULSION_RADIUS_PX && distance > 1) {
+      const push = (1 - distance / REPULSION_RADIUS_PX) * REPULSION_SPEED * env.dt;
+      this.offsetX[i] = (this.offsetX[i] ?? 0) + (dx / distance) * push;
+      this.offsetY[i] = (this.offsetY[i] ?? 0) + (dy / distance) * push;
     }
-    this.dist[i] = r;
-    return r;
+    this.offsetX[i] = (this.offsetX[i] ?? 0) * env.offsetDecay;
+    this.offsetY[i] = (this.offsetY[i] ?? 0) * env.offsetDecay;
   }
 
-  private computeScreenCoord(i: number, r: number, env: StepEnv): ParticlePos {
-    const ang = this.angle[i] ?? 0;
-    const rawX = env.cx + Math.cos(ang) * r;
-    const rawY = env.cy + Math.sin(ang) * r * 0.78;
-    return applyCursorRepulsion({ x: rawX, y: rawY }, env.ctx.cursor, env.dt);
+  private place(i: number, env: StepEnv): void {
+    const sway = Math.sin((this.swayPhase[i] ?? 0) + this.timeSeconds * (this.swayFreq[i] ?? 0));
+    this.x[i] = (this.lane[i] ?? 0) * env.ctx.width + sway * (this.swayAmp[i] ?? 0) + (this.offsetX[i] ?? 0);
+    const pathY = env.ctx.height + EDGE_MARGIN_PX - (this.travel[i] ?? 0) * env.travelPx;
+    this.y[i] = pathY + (this.offsetY[i] ?? 0);
   }
 
-  private applyFluidMotion(i: number, pos: ParticlePos, dt: number): void {
-    const isFirstStep = (this.x[i] ?? 0) === 0 && (this.y[i] ?? 0) === 0;
-    const prevX = isFirstStep ? pos.x : (this.x[i] ?? pos.x);
-    const prevY = isFirstStep ? pos.y : (this.y[i] ?? pos.y);
-    const vx = pos.x - prevX;
-    const vy = pos.y - prevY;
-    const speed = Math.hypot(vx, vy) / Math.max(0.001, dt);
-
-    const dir = computeParticleDir(this.angle[i] ?? 0, { vx, vy, speed });
-    this.dirX[i] = dir.dx;
-    this.dirY[i] = dir.dy;
-    this.stretch[i] = updateStretchValue(this.stretch[i] ?? 0, speed, dt);
-    this.x[i] = pos.x;
-    this.y[i] = pos.y;
+  /** Капля вытягивается вдоль хода: stretch → min(1.2, |v| / 200), сглаженно; острым концом назад. */
+  private shape(i: number, speed: number, dt: number): void {
+    const target = Math.min(1.2, Math.abs(speed) / 200);
+    const eased = (this.stretch[i] ?? 0) + (target - (this.stretch[i] ?? 0)) * (1 - Math.pow(0.5, dt * 60));
+    this.stretch[i] = eased < 0.005 ? 0 : eased;
+    this.dirY[i] = speed < 0 ? 1 : -1;
   }
 
-  private applyParticleAppearance(i: number, r: number, frame: CloudsFrame): void {
-    const maxR = this.maxDist[i] ?? 650;
-    const bRad = this.baseRadius[i] ?? 2.5;
-    this.radius[i] = bRad * (1.0 + Math.min(0.3, r / 500));
-
-    const enterFade = Math.min(1, r / 35);
-    const exitFade = Math.min(1, Math.max(0, (maxR - r) / (maxR * 0.15)));
-    const cloudsFade = frame.cloudsVisibility > 0 ? frame.cloudsVisibility : 1.0 - frame.wordmarkOpacity;
-    this.alpha[i] = enterFade * exitFade * frame.stage * Math.max(0.4, cloudsFade);
+  private fade(i: number, env: StepEnv): void {
+    const pathPx = (this.travel[i] ?? 0) * env.travelPx;
+    const edgeFade = Math.min(1, pathPx / FADE_PX, (env.travelPx - pathPx) / FADE_PX);
+    const rankFade = Math.min(1, Math.max(0, (env.frame.dropsFraction - (this.rank[i] ?? 0)) / RANK_FADE));
+    this.alpha[i] = Math.max(0, edgeFade) * rankFade * env.frame.dropsVisibility * env.frame.stage;
   }
 
   private stepParticle(i: number, env: StepEnv): void {
-    const r = this.advanceRadialDistance(i, env.dt, env.dragDecay);
-    const pos = this.computeScreenCoord(i, r, env);
-    this.applyFluidMotion(i, pos, env.dt);
-    this.applyParticleAppearance(i, r, env.frame);
+    const speed = this.advance(i, env);
+    this.repel(i, env);
+    this.place(i, env);
+    this.shape(i, speed, env.dt);
+    this.fade(i, env);
   }
 }

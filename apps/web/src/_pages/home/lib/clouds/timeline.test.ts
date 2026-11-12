@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLOUDS_SCREENS, frameAt, ramp, windowOpacity } from './timeline';
+import { CLOUDS_SCREENS, VEIL_END, VEIL_START, frameAt, ramp, windowOpacity } from './timeline';
 
 describe('clouds timeline', () => {
   describe('ramp', () => {
@@ -81,26 +81,38 @@ describe('clouds timeline', () => {
       expect(frameAt(2.4).phrases[3]).toBe(0);
     });
 
-    it('О4–О5: дождь капель вверх активируется', () => {
-      expect(frameAt(1.0).rainUpIntensity).toBe(0);
-      expect(frameAt(1.6).rainUpIntensity).toBe(1);
-      expect(frameAt(2.1).rainUpIntensity).toBe(1);
-      expect(frameAt(2.1).rainCountFraction).toBe(1);
+    it('капли проступают вместе с облаками', () => {
+      expect(frameAt(0.4).dropsVisibility).toBe(0);
+      expect(frameAt(0.625).dropsVisibility).toBeCloseTo(0.5);
+      expect(frameAt(0.9).dropsVisibility).toBe(1);
     });
 
-    it('О6: дальняя гряда уходит до начала потемнения', () => {
-      // По раскадровке дальняя гряда должна уйти из кадра до начала потемнения:
-      // она не вырезана из белого фона
-      const fBeforeDark = frameAt(2.6);
-      expect(fBeforeDark.farRidgeOpacity).toBe(0);
-      expect(fBeforeDark.bgDarkness).toBeLessThan(0.4);
+    it('в О2–О3 в кадре горсть капель, к концу О5 поднимаются все', () => {
+      expect(frameAt(1.0).dropsFraction).toBeCloseTo(0.3);
+      expect(frameAt(2.1).dropsFraction).toBeCloseTo(1);
     });
 
-    it('О6: к u = 3.0 фон темнеет в ночной, тушь светлеет, капли переходят в дымку', () => {
-      const fEnd = frameAt(CLOUDS_SCREENS);
-      expect(fEnd.bgDarkness).toBe(1.0);
-      expect(fEnd.inkLightness).toBe(1.0);
-      expect(fEnd.hazeBlend).toBe(1.0);
+    it('скорость всплытия растёт в О4–О5', () => {
+      expect(frameAt(1.0).rise).toBeCloseTo(0.35);
+      expect(frameAt(2.1).rise).toBeCloseTo(1);
+    });
+
+    it('вуаль сумерек не идёт до VEIL_START и закончена к VEIL_END', () => {
+      expect(frameAt(VEIL_START - 0.1).veil).toBe(0);
+      expect(frameAt(VEIL_START).veil).toBe(0);
+      expect(frameAt((VEIL_START + VEIL_END) / 2).veil).toBeCloseTo(0.5);
+      expect(frameAt(VEIL_END).veil).toBe(1);
+      expect(frameAt(CLOUDS_SCREENS).veil).toBe(1);
+    });
+
+    it('под вуалью капли замедляются и повисают дымкой', () => {
+      // К VEIL_END всплытие падает до 20% от полного
+      expect(frameAt(VEIL_END).rise).toBeCloseTo(0.2);
+    });
+
+    it('облака уходят к приходу ночной сцены', () => {
+      expect(frameAt(2.72).cloudsVisibility).toBe(1);
+      expect(frameAt(2.9).cloudsVisibility).toBe(0);
     });
   });
 });

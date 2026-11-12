@@ -5,6 +5,10 @@ export const CLOUDS_SCREENS = 3.0;
 /** Фразы проступают и уходят за 0,1 экрана (Раскадровка.md). */
 export const PHRASE_FADE_SCREENS = 0.1;
 
+/** Вуаль сумерек (О6): пунктир опускается по листу между этими экранами (lib/clouds/dusk-veil.ts). */
+export const VEIL_START = 2.2;
+export const VEIL_END = 2.88;
+
 export interface CloudsFrame {
   readonly u: number;
   /** Непрозрачность всей закреплённой сцены. */
@@ -15,33 +19,18 @@ export interface CloudsFrame {
    */
   readonly wordmarkScale: number;
   readonly wordmarkOpacity: number;
-  /** Положение камеры по глубине Z для 3D-пролёта сквозь облака (0..2.95). */
+  /** Высота камеры на подъёме сквозь эшелоны облаков (0..2.95), см. projectCloud. */
   readonly zCam: number;
-  /** Видимость 3D-облаков (проступают после влёта в чашу буквы U в О2, уходят к О6). */
+  /** Видимость облаков (проступают после влёта в чашу буквы U в О2, уходят к концу О6). */
   readonly cloudsVisibility: number;
-  /**
-   * О2–О6: Вертикальный параллакс облаков (камера поднимается вверх, облака опускаются).
-   * Дальняя гряда движется медленно, ближние облака — быстрее.
-   */
-  readonly farRidgeY: number;
-  readonly farRidgeOpacity: number;
-  readonly nearCloudsY: number;
-  readonly nearCloudsOpacity: number;
-  /**
-   * О4–О5 (1,3–2,3 экрана): дождь капель туши идёт вверх.
-   * Интенсивность скорости и доля активных капель.
-   */
-  readonly rainUpIntensity: number;
-  readonly rainCountFraction: number;
-  /**
-   * О6 (2,3–3,0 экрана): смена дня на ночь.
-   * bgDarkness: 0 (белый лист) → 1 (#0b0b0d). Дальняя гряда уходит до 2.6, потемнение идёт 2.5→3.0.
-   * inkLightness: 0 (чёрная тушь) → 1 (светлая тушь ночи).
-   * hazeBlend: 0 (вертикальный полёт) → 1 (замедление в ночную дымку).
-   */
-  readonly bgDarkness: number;
-  readonly inkLightness: number;
-  readonly hazeBlend: number;
+  /** Видимость капель туши: проступают вместе с облаками. */
+  readonly dropsVisibility: number;
+  /** Доля капель в кадре: в О2–О3 их горсть, к О5 поднимаются все. */
+  readonly dropsFraction: number;
+  /** Скорость всплытия капель без скролла, 0…1: растёт в О4–О5 и гаснет под вуалью (капли повисают дымкой). */
+  readonly rise: number;
+  /** Ход вуали сумерек: 0 — день, 1 — весь лист в негативе (ночь). */
+  readonly veil: number;
   /** Непрозрачность каждой из 4 фраз. */
   readonly phrases: readonly number[];
 }
@@ -77,41 +66,20 @@ export function frameAt(u: number): CloudsFrame {
   const wordmarkScale = 1.0 + Math.pow(wordmarkP, 2.2) * 15.0;
   const wordmarkOpacity = 1.0 - ramp(u, 0.22, 0.5);
 
-  // Камера летит сквозь 3D-эшелоны облаков от z=0 до z=2.95
+  // Камера поднимается сквозь эшелоны облаков от z=0 до z=2.95
   const zCam = ramp(u, 0.45, 3.0) * 2.95;
 
-  // 3D-облака проявляются после влёта в чашу буквы U (О2: 0.35..0.65) и рассеиваются к ночи (2.65..2.95)
-  const cloudsEnter = ramp(u, 0.35, 0.65);
-  const cloudsExit = 1 - ramp(u, 2.65, 2.95);
-  const cloudsVisibility = cloudsEnter * cloudsExit;
+  // Облака проявляются после влёта в чашу буквы U (О2) и уходят к приходу ночной сцены
+  const cloudsVisibility = ramp(u, 0.35, 0.65) * (1 - ramp(u, 2.72, 2.9));
 
-  // О2–О6: Облака.
-  // Дальняя гряда: входит на 0.4..0.9, уходит вниз до начала потемнения (к u = 2.5..2.6)
-  const farEnter = ramp(u, 0.35, 0.7);
-  const farExit = 1 - ramp(u, 2.3, 2.55);
-  const farRidgeOpacity = Math.min(farEnter, farExit);
-  // Параллакс: смещение по Y (в долях экрана)
-  const farRidgeY = (u - 0.5) * 0.28;
+  // Капли: горсть с появлением облаков, с О4 (1,3 экрана) их всё больше и они всплывают быстрее
+  const dropsVisibility = ramp(u, 0.45, 0.8);
+  const rainUp = ramp(u, 1.25, 2.1);
+  const dropsFraction = 0.3 + 0.7 * rainUp;
 
-  // Ближние облака: входят быстрее, уходят на u = 2.4..2.8
-  const nearEnter = ramp(u, 0.45, 0.85);
-  const nearExit = 1 - ramp(u, 2.45, 2.85);
-  const nearCloudsOpacity = Math.min(nearEnter, nearExit);
-  const nearCloudsY = (u - 0.5) * 0.65;
-
-  // О4–О5: Дождь капель вверх (1.3–2.3 экрана)
-  const rainStart = ramp(u, 1.25, 1.5);
-  const rainEnd = 1 - ramp(u, 2.3, 2.7);
-  const rainUpIntensity = Math.min(rainStart, rainEnd);
-  // В О5 (1.8..2.3) капель больше: 0.5 в О4, до 1.0 в О5
-  const rainCountFraction = ramp(u, 1.25, 1.9);
-
-  // О6: Смена дня на ночь (2.3–3.0 экрана)
-  // Потемнение фона: с 2.5 до 3.0 экрана
-  const bgDarkness = ramp(u, 2.45, 3.0);
-  const inkLightness = ramp(u, 2.45, 3.0);
-  // Замедление капель в ночную дымку: с 2.4 до 3.0
-  const hazeBlend = ramp(u, 2.4, 3.0);
+  // О6: вуаль сумерек; под ней капли замедляются и повисают
+  const veil = ramp(u, VEIL_START, VEIL_END);
+  const rise = (0.35 + 0.65 * rainUp) * (1 - 0.8 * veil);
 
   // Фразы О2–О5
   const phrases = CLOUDS_PHRASES.map((phrase) =>
@@ -125,15 +93,10 @@ export function frameAt(u: number): CloudsFrame {
     wordmarkOpacity,
     zCam,
     cloudsVisibility,
-    farRidgeY,
-    farRidgeOpacity,
-    nearCloudsY,
-    nearCloudsOpacity,
-    rainUpIntensity,
-    rainCountFraction,
-    bgDarkness,
-    inkLightness,
-    hazeBlend,
+    dropsVisibility,
+    dropsFraction,
+    rise,
+    veil,
     phrases,
   };
 }

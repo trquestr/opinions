@@ -38,6 +38,11 @@ describe('frameAt', () => {
     expect(frameAt(3).stage).toBe(1);
   });
 
+  it('смена дня на ночь занимает 0,12 экрана до начала сцены', () => {
+    expect(frameAt(-0.12).stage).toBe(0);
+    expect(frameAt(-0.06).stage).toBeCloseTo(0.5);
+  });
+
   it('на 0,5 экрана видна только первая фраза', () => {
     expect(frameAt(0.5).phrases).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
@@ -58,7 +63,6 @@ describe('frameAt', () => {
   ])('на u=%s целевая фигура туши — %s', (u, figure) => {
     expect(frameAt(u).figure).toBe(figure);
   });
-
 
   it.each([0.05, 0.4, 0.79, 0.8, 1.55, 1.6, 2.4, 3.2, 4.0, 4.4, 4.5, 4.95, 5.0, 5.2, 5.4, 6.0])(
     'на u=%s видно не больше одной фразы',

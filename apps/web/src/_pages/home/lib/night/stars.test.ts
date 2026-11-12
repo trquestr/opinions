@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildStarTable, createRandom, DIPPER_CENTER, DIPPER_STARS, DRAWABLE_STARS, INVITE_STARS, STAR_STRIDE } from './stars';
+import {
+  buildStarTable,
+  createRandom,
+  DIPPER_CENTER,
+  DIPPER_STARS,
+  DRAWABLE_STARS,
+  INVITE_STARS,
+  STAR_STRIDE,
+} from './stars';
 
 describe('звёзды ковша', () => {
   it('семь звёзд совпадают с манифестом от Дубхе до Алькаида', () => {
@@ -58,11 +66,13 @@ describe('buildStarTable', () => {
 
   it('первая яркая звезда стоит после фоновых: Дубхе с обликом по звёздной величине 1.79', () => {
     const first = 150 * STAR_STRIDE;
-    const [x, y, size, brightness, kind, blue, rays] = Array.from(buildStarTable().slice(first, first + STAR_STRIDE));
+    const [x, y, size, brightness, kind, tone, rays] = Array.from(
+      buildStarTable().slice(first, first + STAR_STRIDE),
+    );
     expect([x, y, kind]).toEqual([1, 0, 1]);
     expect(size).toBeCloseTo(4.693, 3);
     expect(brightness).toBeCloseTo(0.9009, 3);
-    expect(blue).toBeCloseTo(0.15, 5);
+    expect(tone).toBeCloseTo(0.15, 5);
     expect(rays).toBeCloseTo(0.12, 5);
   });
 
@@ -73,10 +83,10 @@ describe('buildStarTable', () => {
     expect(sizeOf(4)).toBeCloseTo(4.719, 3);
   });
 
-  it('Алькаид — самый голубой, Дубхе — самый бледный', () => {
+  it('Алькаид — самый светлый по тону, Дубхе — самый тёплый', () => {
     const table = buildStarTable();
-    const blueOf = (index: number) => table[(150 + index) * STAR_STRIDE + 5];
-    expect(blueOf(6)).toBeCloseTo(1, 5);
-    expect(blueOf(0)).toBeCloseTo(0.15, 5);
+    const toneOf = (index: number) => table[(150 + index) * STAR_STRIDE + 5];
+    expect(toneOf(6)).toBeCloseTo(1, 5);
+    expect(toneOf(0)).toBeCloseTo(0.15, 5);
   });
 });

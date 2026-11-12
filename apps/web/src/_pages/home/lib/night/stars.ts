@@ -61,7 +61,7 @@ export function createRandom(seed: number): () => number {
 }
 
 export const STAR_KIND = { background: 0, dipper: 1, invite: 2 } as const;
-/** На звезду 7 чисел: x, y, размер ядра (px), яркость, вид (STAR_KIND), голубизна 0…1, поворот лучей (рад). */
+/** На звезду 7 чисел: x, y, размер ядра (px), яркость, вид (STAR_KIND), тон 0…1, поворот лучей (рад). */
 export const STAR_STRIDE = 7;
 const BACKGROUND_STAR_COUNT = 150;
 const BACKGROUND_SEED = 20261111;
@@ -69,27 +69,38 @@ const BACKGROUND_SEED = 20261111;
 /**
  * Облик семи звёзд ковша — по настоящим данным, чтобы они были разными, как в небе.
  * Видимая звёздная величина m (меньше — ярче): размер ядра s = 2.6 + 1.3·(3.4 − m) px, яркость 0.75 + 0.15·(3.4 − m)/1.6.
- * Голубизна — по спектральному классу, но в холодной гамме (решение владельца 2026-11-11: звёзды голубоватые):
- * Алькаид (B3) — самый синий, белые A-звёзды — посередине, Дубхе (на деле оранжевый гигант K0) — самый бледный.
+ * Тон — по спектральному классу, в гамме светлой туши (решение владельца 2026-11-12: звёзды того же материала,
+ * что и весь лист; до этого были голубоватыми): 1 — чистая светлая тушь, 0 — тёплая серая. Алькаид (B3) — самый
+ * светлый, белые A-звёзды — посередине, Дубхе (оранжевый гигант K0) — самый тёплый.
  * Поворот лучей — у каждой свой.
  */
-const DIPPER_LOOK: Readonly<Record<string, { readonly magnitude: number; readonly blue: number; readonly rays: number }>> = {
-  Dubhe: { magnitude: 1.79, blue: 0.15, rays: 0.12 },
-  Merak: { magnitude: 2.37, blue: 0.7, rays: -0.2 },
-  Phecda: { magnitude: 2.44, blue: 0.75, rays: 0.32 },
-  Megrez: { magnitude: 3.31, blue: 0.55, rays: -0.05 },
-  Alioth: { magnitude: 1.77, blue: 0.65, rays: 0.22 },
-  Mizar: { magnitude: 2.04, blue: 0.7, rays: -0.3 },
-  Alkaid: { magnitude: 1.86, blue: 1, rays: 0.05 },
+const DIPPER_LOOK: Readonly<
+  Record<string, { readonly magnitude: number; readonly tone: number; readonly rays: number }>
+> = {
+  Dubhe: { magnitude: 1.79, tone: 0.15, rays: 0.12 },
+  Merak: { magnitude: 2.37, tone: 0.7, rays: -0.2 },
+  Phecda: { magnitude: 2.44, tone: 0.75, rays: 0.32 },
+  Megrez: { magnitude: 3.31, tone: 0.55, rays: -0.05 },
+  Alioth: { magnitude: 1.77, tone: 0.65, rays: 0.22 },
+  Mizar: { magnitude: 2.04, tone: 0.7, rays: -0.3 },
+  Alkaid: { magnitude: 1.86, tone: 1, rays: 0.05 },
 };
-const DEFAULT_LOOK = { magnitude: 2.4, blue: 0.6, rays: 0 } as const;
+const DEFAULT_LOOK = { magnitude: 2.4, tone: 0.6, rays: 0 } as const;
 
 /** Фоновые звёзды — в долях экрана (0…1), а не в единицах ковша: они заполняют всё небо при любом масштабе. */
 function backgroundStars(): number[] {
   const random = createRandom(BACKGROUND_SEED);
   return Array.from({ length: BACKGROUND_STAR_COUNT }, () => {
     const brightness = 0.2 + 0.5 * random() ** 2;
-    return [random(), random(), 0.6 + 0.8 * random(), brightness, STAR_KIND.background, 0.4 + 0.5 * random(), 0];
+    return [
+      random(),
+      random(),
+      0.6 + 0.8 * random(),
+      brightness,
+      STAR_KIND.background,
+      0.4 + 0.5 * random(),
+      0,
+    ];
   }).flat();
 }
 
@@ -97,7 +108,7 @@ function dipperStars(): number[] {
   return manifest.stars.flatMap(({ name, x, y }) => {
     const look = DIPPER_LOOK[name] ?? DEFAULT_LOOK;
     const lift = 3.4 - look.magnitude;
-    return [x, y, 2.6 + 1.3 * lift, 0.75 + (0.15 * lift) / 1.6, STAR_KIND.dipper, look.blue, look.rays];
+    return [x, y, 2.6 + 1.3 * lift, 0.75 + (0.15 * lift) / 1.6, STAR_KIND.dipper, look.tone, look.rays];
   });
 }
 

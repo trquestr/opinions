@@ -181,6 +181,64 @@ body {
   color: #ecece8;
 }
 
+/* Дневной лист сцены «Облака»: ночным его делает вуаль сумерек (lib/clouds/dusk-veil.ts), а не смена фона. */
+.clouds-stage {
+  background: #fff;
+}
+
+/* Светлый ореол выбивает гравюру под буквами, если облако прошло за фразой. */
+.clouds-phrase {
+  color: #111112;
+  text-shadow:
+    0 0 6px #fff,
+    0 0 14px #fff,
+    0 0 28px #fff,
+    0 0 44px #fff;
+}
+
+/*
+ * Проявление фразы рассказчика буква за буквой (приём с мудборда, Figma 22:15): буква поднимается снизу
+ * на 0.6em и выходит из расфокуса. Сцена ставит на фразу data-shown="true", когда скролл вошёл в её окно;
+ * дальше буквы идут по времени, у каждой своя задержка --reveal-delay (lib/reveal-text.ts).
+ * Резкость приходит позже непрозрачности, подъём замедляется к концу — буква «всплывает и встаёт».
+ * Уход быстрый и без очереди: к этому моменту фразу уже погасил скролл, буквы просто возвращаются вниз.
+ */
+.phrase-word {
+  white-space: nowrap;
+}
+
+.phrase-letter {
+  display: inline-block;
+  opacity: 0;
+  filter: blur(0.34em);
+  translate: 0 0.6em;
+  transition:
+    opacity 0.25s linear,
+    filter 0.25s linear,
+    translate 0.25s linear;
+}
+
+[data-shown='true'] .phrase-letter {
+  opacity: 1;
+  filter: none;
+  translate: 0 0;
+  transition:
+    opacity 1.3s cubic-bezier(0.3, 0, 0.3, 1),
+    filter 1.7s cubic-bezier(0.2, 0.6, 0.2, 1),
+    translate 1.6s cubic-bezier(0.16, 0.8, 0.24, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phrase-letter,
+  [data-shown='true'] .phrase-letter {
+    opacity: 1;
+    filter: none;
+    translate: 0 0;
+    transition: none;
+  }
+}
+
 .night-phrase,
 .clouds-phrase {
   font-family: Georgia, 'Times New Roman', serif;
