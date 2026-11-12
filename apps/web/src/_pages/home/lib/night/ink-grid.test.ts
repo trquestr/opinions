@@ -147,3 +147,16 @@ describe('InkGrid.end и begin', () => {
     expect(grid.data[texel(0, 64) + 2]).toBe(9);
   });
 });
+
+describe('InkGrid.add с неполной каплей', () => {
+  it('недостающие поля капли заполняются безопасными значениями', () => {
+    const grid = createGrid();
+    grid.begin();
+
+    // Пустая капля: радиус и вытянутость → 0, направление по умолчанию (1, 0)
+    grid.add(30, 25, new Float32Array(0));
+
+    expect(Array.from(grid.data.slice(texel(1, 64), texel(1, 64) + 4))).toEqual([30, 25, 0, 0]);
+    expect(Array.from(grid.data.slice(texel(1, 65), texel(1, 65) + 2))).toEqual([1, 0]);
+  });
+});
