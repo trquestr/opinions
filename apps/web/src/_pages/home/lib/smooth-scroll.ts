@@ -12,10 +12,14 @@ type Direction = 1 | -1;
 
 /** Длительность шага на один экран пути, мс. */
 const MS_PER_SCREEN = 2200;
+/** Межсценовые переходы длиннее одного экрана (вуаль сумерек, вход в облака) идут значительно медленнее. */
+const EXTRA_SCREEN_MS = 12600;
 /** Короткий шаг не должен быть рывком. */
 const MIN_STEP_MS = 900;
-/** Длинный шаг не должен тянуться бесконечно. */
-const MAX_STEP_MS = 2400;
+/** Потолок длительности для самых длинных межсценовых переходов. */
+const MAX_STEP_MS = 8500;
+/** Глубина замедления в середине длинного межсценового шага (момент перехода точек в чёрное). */
+const LONG_STEP_MID_DIP = 0.68;
 /** Остановка ближе этого расстояния (px) считается той, на которой мы уже стоим. */
 const STOP_EPSILON_PX = 2;
 /**
@@ -61,15 +65,22 @@ export function nextStop(stops: readonly number[], fromPx: number, direction: Di
   return best;
 }
 
-/** Длительность шага: пропорциональна пути, но в пределах [MIN_STEP_MS, MAX_STEP_MS]. */
+/** Длительность шага: линейная до 1 экрана, плавно замедленная для межсценовых переходов (> 1 экрана), в пределах [MIN_STEP_MS, MAX_STEP_MS]. */
 export function stepDurationMs(distancePx: number, viewportHeightPx: number): number {
-  const raw = (distancePx / Math.max(1, viewportHeightPx)) * MS_PER_SCREEN;
+  const screens = distancePx / Math.max(1, viewportHeightPx);
+  const raw = screens <= 1 ? screens * MS_PER_SCREEN : MS_PER_SCREEN + (screens - 1) * EXTRA_SCREEN_MS;
   return Math.min(MAX_STEP_MS, Math.max(MIN_STEP_MS, raw));
 }
 
-/** easeInOutSine: 0.5 − 0.5·cos(π·p), мягкий разгон и торможение. */
-function ease(progress: number): number {
-  return 0.5 - 0.5 * Math.cos(Math.PI * progress);
+/**
+ * easeInOutSine с управляемым замедлением середины (dip ∈ [0, 0.7]):
+ * интеграл sin(πp)·(1 + dip·cos(2πp)), где v(0)=v(1)=0, а в центре p=0.5 скорость ниже в (1−dip) раз.
+ */
+function ease(progress: number, midDip = 0): number {
+  const s1 = 0.5 - 0.5 * Math.cos(Math.PI * progress);
+  if (midDip === 0) return s1;
+  const s3 = 0.5 - 0.5 * Math.cos(3 * Math.PI * progress);
+  return ((1 - midDip / 2) * s1 + (midDip / 6) * s3) / (1 - midDip / 3);
 }
 
 class StepScroller {
@@ -79,6 +90,7 @@ class StepScroller {
   private toPx = 0;
   private startedAt = 0;
   private durationMs = 0;
+  private midDip = 0;
   private rafId = 0;
   private lastWheelAt = Number.NEGATIVE_INFINITY;
   private lastWheelDirection: Direction = 1;
@@ -97,6 +109,7 @@ class StepScroller {
     this.direction = direction;
     this.startedAt = performance.now();
     this.durationMs = stepDurationMs(Math.abs(toPx - this.fromPx), window.innerHeight);
+    this.midDip = this.durationMs > MS_PER_SCREEN ? LONG_STEP_MID_DIP : 0;
     if (!this.isAnimating) {
       this.isAnimating = true;
       this.rafId = requestAnimationFrame(this.frame);
@@ -111,7 +124,7 @@ class StepScroller {
       this.isAnimating = false;
       return;
     }
-    window.scrollTo(0, this.fromPx + (this.toPx - this.fromPx) * ease(progress));
+    window.scrollTo(0, this.fromPx + (this.toPx - this.fromPx) * ease(progress, this.midDip));
     this.rafId = requestAnimationFrame(this.frame);
   };
 

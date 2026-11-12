@@ -71,8 +71,8 @@ describe('NightScene: гравюрные детали', () => {
 
     expect(images[0]?.getAttribute('data-src')).toBe('/assets/night/details/detail-pine-branch.webp');
     expect(images[0]?.getAttribute('data-index')).toBe('0');
-    expect(images.at(-1)?.getAttribute('data-src')).toBe('/assets/night/details/detail-lantern.webp');
-    expect(images.at(-1)?.getAttribute('data-index')).toBe('8');
+    expect(images.at(-1)?.getAttribute('data-src')).toBe('/assets/night/details/detail-dune.webp');
+    expect(images.at(-1)?.getAttribute('data-index')).toBe('7');
   });
 
   it('в разметке у деталей нет src: картинки не качаются с первым экраном', () => {

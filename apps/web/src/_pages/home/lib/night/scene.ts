@@ -18,12 +18,13 @@ import {
 } from './camera';
 import { Cursor } from './cursor';
 import { CursorField } from './cursor-field';
+import { createDetailMotion, detailFade, detailOutFade } from './details';
 import { DetailsLayer } from './details-layer';
 import { createHaze, createOutline, loadFigures, pickInkCount } from './ink';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
 import { computeLayout } from './layout';
-import { Projector } from './projection';
+import { Projector, SKY_FOLLOW } from './projection';
 import { createInputState, createNightRenderer, MAX_LINE_SEGMENTS } from './renderer';
 import { StarField } from './star-field';
 import { DIPPER_CENTER, DIPPER_OUTLINE, DIPPER_STARS, DRAWABLE_STARS, FIGURE_BOUNDS } from './stars';
@@ -59,6 +60,9 @@ const HOVER_MS = 600;
 const HOVER_RADIUS_PX = 22;
 /** Линии не упираются в звёзды: зазор у каждого конца, px — чтобы ядро звезды оставалось чистым. */
 const LINE_GAP_PX = 10;
+/** Область захвата и удержания орбитального роя капель курсора вокруг звёзд созвездия. */
+const STAR_CAPTURE_RADIUS_PX = 70;
+const STAR_RELEASE_RADIUS_PX = 85;
 const SMALL_SCREEN_QUERY = '(max-width: 767px), (pointer: coarse)';
 /**
  * Ракурс за курсором (владелец 2026-11-12: «эффект присутствия объёма»). Курсор в долях экрана n ∈ [−1, 1]:
@@ -163,11 +167,18 @@ class NightScene {
   private lookPitch = 0;
   /** Множитель прозрачности боковых фраз: растёт к концу хода камеры. */
   private sideFade = 1;
+  /** Движение гравюрных деталей в кадре и сдвиг неба — рабочие объекты без аллокаций в rAF. */
+  private readonly detailMotion = createDetailMotion();
+  private readonly skyLag = { yaw: 0, pitch: 0 };
+  private readonly skyDrift = { yaw: 0, pitch: 0 };
+  private activeDetailFigure = 0;
   private lastFrameAt = 0;
   private drawing: Drawing = EMPTY_DRAWING;
   private finishedAt: number | null = null;
   private isEpilogueDue = false;
   private pointer: Point | null = null;
+  private swarmStarIndex: number | null = null;
+  private readonly starAnchorPoint = { x: 0, y: 0 };
   private hoverStar: number | null = null;
   private hoverAt = -Infinity;
   private frameId = 0;
@@ -328,6 +339,8 @@ class NightScene {
     this.lookTargetY = 0;
     this.cursor.leave();
     this.cursorField.pointer.leave();
+    this.cursorField.setStarAnchor(null);
+    this.swarmStarIndex = null;
   }
 
   private handlePointerDown(event: PointerEvent): void {
@@ -417,10 +430,12 @@ class NightScene {
     const isAnimating = this.updateInput(now);
     const isLooking = this.updateLook(now);
     const isCameraMoving = this.moveCamera(now);
+    this.updateDetailMotion(now);
     this.updateDetails();
     this.writeSegments();
     this.updateSideFade(now);
     this.ink.step(this.inkStep, this.projector, this.grid);
+    this.updateStarSwarm();
     // Длительность кадра для поля курсора: после паузы (вкладка, скролл издалека) — не больше 50 мс
     this.cursorField.step(Math.min(50, now - this.lastFrameAt) || 16.667);
     this.lastFrameAt = now;
@@ -431,9 +446,88 @@ class NightScene {
     if (isAnimating || isLooking || isCameraMoving || !this.inkStep.isReducedMotion) this.scheduleRender();
   }
 
-  /** Гравюрные детали по текущей позе камеры (поза выставлена applyCamera) и кадру таймлайна. */
+  /**
+   * При наведении на область вокруг звёзд созвездия капли курсора отрываются и закручиваются
+   * по 3D-орбитальным траекториям вокруг звезды (по принципу облачка в герое).
+   */
+  private updateStarSwarm(): void {
+    if (!this.pointer || this.reducedMotion.matches) {
+      this.cursorField.setStarAnchor(null);
+      this.swarmStarIndex = null;
+      return;
+    }
+    const dipperCount = DIPPER_STARS.length;
+    // Гистерезис: если звезда уже захвачена, отпускаем только при выходе за пределы STAR_RELEASE_RADIUS_PX
+    if (this.swarmStarIndex !== null) {
+      this.stars.drawablePoint(this.swarmStarIndex, this.endA);
+      const curDist = Math.hypot(this.endA.x - this.pointer.x, this.endA.y - this.pointer.y);
+      if (curDist > STAR_RELEASE_RADIUS_PX) {
+        this.swarmStarIndex = null;
+      }
+    }
+    // Поиск ближайшей звезды созвездия в радиусе захвата
+    let closestIndex = this.swarmStarIndex;
+    let minDist = STAR_CAPTURE_RADIUS_PX;
+    for (let i = 0; i < dipperCount; i++) {
+      this.stars.drawablePoint(i, this.endA);
+      const d = Math.hypot(this.endA.x - this.pointer.x, this.endA.y - this.pointer.y);
+      if (d < minDist) {
+        minDist = d;
+        closestIndex = i;
+      }
+    }
+    this.swarmStarIndex = closestIndex;
+    if (this.swarmStarIndex !== null) {
+      this.stars.drawablePoint(this.swarmStarIndex, this.endA);
+      this.starAnchorPoint.x = this.endA.x;
+      this.starAnchorPoint.y = this.endA.y;
+      this.cursorField.setStarAnchor(this.starAnchorPoint);
+    } else {
+      this.cursorField.setStarAnchor(null);
+    }
+  }
+
+  /** Гравюрные детали по кадру таймлайна и движению камеры (detailMotion). */
   private updateDetails(): void {
-    this.details.update(this.projector, this.frame);
+    this.details.update(this.view, this.frame, this.detailMotion);
+  }
+
+  /**
+   * Движение деталей по ходу камеры: проявление detailFade(p), угасание уходящей фигуры detailOutFade(p)
+   * и сдвиг вместе с небом −f·(Δψ, Δθ), включая поворот взгляда за курсором lookYaw/lookPitch (details.ts).
+   */
+  private updateDetailMotion(now: number): void {
+    const motion = this.detailMotion;
+    const lookX = -this.projector.focal * this.lookYaw * SKY_FOLLOW;
+    const lookY = -this.projector.focal * this.lookPitch * SKY_FOLLOW;
+    if (!this.sideLayout.matches) {
+      motion.fade = 1;
+      motion.shiftX = lookX;
+      motion.shiftY = lookY;
+      motion.leavingFigure = null;
+      motion.leavingFade = 0;
+      return;
+    }
+    const progress = this.camera.progress(now);
+    motion.fade = detailFade(progress);
+    this.camera.skyLag(this.skyLag);
+    motion.shiftX = -this.projector.focal * this.skyLag.yaw + lookX;
+    motion.shiftY = -this.projector.focal * this.skyLag.pitch + lookY;
+    this.updateLeavingMotion(progress, lookX, lookY);
+  }
+
+  /** Сдвиг и угасание уходящей фигуры: старт из угла, плавный уход в сторону движения неба + взгляд за курсором. */
+  private updateLeavingMotion(progress: number, lookX: number, lookY: number): void {
+    const motion = this.detailMotion;
+    if (progress >= 1 || motion.leavingFigure === null) {
+      motion.leavingFigure = null;
+      motion.leavingFade = 0;
+      return;
+    }
+    motion.leavingFade = detailOutFade(progress);
+    this.camera.skyDrift(this.skyDrift);
+    motion.leavingShiftX = -this.projector.focal * this.skyDrift.yaw + lookX;
+    motion.leavingShiftY = -this.projector.focal * this.skyDrift.pitch + lookY;
   }
 
   /** Сглаживает ракурс за курсором и отдаёт его камере. Возвращает, догоняет ли он ещё цель. */
@@ -476,11 +570,21 @@ class NightScene {
     return overviewShot(input, computeLayout(this.view, FIGURE_BOUNDS));
   }
 
+  /** Запоминает уходящую фигуру (если была) для плавного исчезновения по ходу движения камеры. */
+  private updateLeavingFigure(): void {
+    const next = this.inkStep.target;
+    const prev = this.activeDetailFigure;
+    const isAnimated = !this.inkStep.isReducedMotion && this.sideLayout.matches && prev >= 1 && prev !== next;
+    this.detailMotion.leavingFigure = isAnimated ? prev : null;
+    this.activeDetailFigure = next;
+  }
+
   /** Наводит камеру на ракурс состояния, двигает её и проецирует звёзды. Возвращает, меняется ли ракурс. */
   private moveCamera(now: number): boolean {
     const key = this.cameraKeyFor(this.inkStep.target);
     if (key !== this.cameraKey) {
       this.cameraKey = key;
+      this.updateLeavingFigure();
       // Без анимации камера не едет, а сразу встаёт в новый ракурс
       const shot = this.shotFor(this.inkStep.target);
       if (this.inkStep.isReducedMotion) this.camera.snap(shot);

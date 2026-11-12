@@ -24,6 +24,31 @@ const WAVE_MS = 440;
 const CLICK_POWER = 0.4;
 const STRETCH = 1.0;
 
+interface SwarmRing {
+  readonly alpha: number;
+  readonly beta: number;
+  readonly r: number;
+  readonly speed: number;
+  readonly count: number;
+}
+
+interface SwarmDroplet {
+  readonly ring: SwarmRing;
+  readonly phase: number;
+  readonly baseRadius: number;
+  readonly spawnAngle: number;
+  readonly spawnRadius: number;
+  readonly spawnDelay: number;
+  curX: number;
+  curY: number;
+  currentRadius: number;
+  migration: number;
+  originX: number;
+  originY: number;
+  deflectX: number;
+  deflectY: number;
+}
+
 interface FieldConfig {
   readonly fieldRadius: number;
   readonly minDist: number;
@@ -194,6 +219,15 @@ export class CursorField {
   private maxX = -1e5;
   private maxY = -1e5;
   private readonly byRadiusDesc = (a: number, b: number) => (this.fr[b] ?? 0) - (this.fr[a] ?? 0);
+  private hasAnchor = false;
+  private anchorX = 0;
+  private anchorY = 0;
+  private targetAnchorX = 0;
+  private targetAnchorY = 0;
+  private swarmActive = 0.0;
+  private swarmTime = 0.0;
+  private readonly swarmEase = { migIn: 0, migOut: 0, rEase: 0, defEase: 0 };
+  private readonly swarmDroplets: SwarmDroplet[] = [];
 
   constructor(private readonly random: () => number = Math.random) {}
 
@@ -220,11 +254,40 @@ export class CursorField {
     this.binRows = Math.ceil((view.height + PAD * 2) / BIN);
     this.bins = Array.from({ length: this.binCols * this.binRows }, () => []);
     for (let i = 0; i < n; i++) this.binOf(this.fx[i] ?? 0, this.fy[i] ?? 0)?.push(i);
+    this.hasAnchor = false;
+    this.anchorX = 0;
+    this.anchorY = 0;
+    this.targetAnchorX = 0;
+    this.targetAnchorY = 0;
+    this.swarmActive = 0;
+    this.swarmTime = 0;
+    this.buildSwarm();
+  }
+
+  /** Привязка к звезде созвездия: капли курсора переходят на 3D-орбиты вокруг звезды. */
+  setStarAnchor(point: { readonly x: number; readonly y: number } | null): void {
+    if (point) {
+      if (!this.hasAnchor) {
+        this.anchorX = point.x;
+        this.anchorY = point.y;
+      }
+      this.targetAnchorX = point.x;
+      this.targetAnchorY = point.y;
+      this.hasAnchor = true;
+    } else {
+      this.hasAnchor = false;
+    }
   }
 
   /** Есть ли живые капли или волны (нужен следующий кадр). */
   isActive(): boolean {
-    return this.active.length > 0 || this.waves.length > 0 || this.pointer.isInside;
+    return (
+      this.active.length > 0 ||
+      this.waves.length > 0 ||
+      this.pointer.isInside ||
+      this.swarmActive > 0.001 ||
+      this.hasAnchor
+    );
   }
 
   click(cx: number, cy: number): void {
@@ -239,6 +302,7 @@ export class CursorField {
     this.pointer.update(s);
     this.updateShift();
     this.advanceWaves(dtMs);
+    this.updateSwarm(s, dtMs);
     if (this.pointer.isInside) this.activateAround(this.pointer.x, this.pointer.y, this.config.fieldRadius);
     let write = 0;
     for (const i of this.active) {
@@ -291,6 +355,172 @@ export class CursorField {
     }
   }
 
+  /**
+   * 3D-орбитальный рой круговых орбит Резерфорда (как на эскизе):
+   * 3 наклонных круговых кольца под углами (α, β), встречные направления вращения,
+   * мелкие звёздные капли с уменьшением размера при прохождении «за звездой» (эффект 3D-глубины).
+   */
+  private buildSwarm(): void {
+    const scale = Math.max(0.65, Math.min(1.0, this.config.maxRadius / 12));
+    const orbitR = 48 * scale;
+    const beta = (64 * Math.PI) / 180;
+    const rings: SwarmRing[] = [
+      {
+        alpha: (-35 * Math.PI) / 180,
+        beta,
+        r: orbitR,
+        speed: 1.4,
+        count: 4,
+      },
+      {
+        alpha: (35 * Math.PI) / 180,
+        beta: -beta,
+        r: orbitR,
+        speed: -1.2,
+        count: 4,
+      },
+      {
+        alpha: (90 * Math.PI) / 180,
+        beta,
+        r: orbitR * 0.95,
+        speed: 1.6,
+        count: 4,
+      },
+    ];
+
+    // Мелкие капли-звёзды (от 2.0 до 3.4 px), чтобы не слипаться в единое пятно
+    const ringRadii = [
+      [2.2, 3.2, 2.0, 3.0],
+      [2.8, 2.2, 3.4, 2.4],
+      [2.0, 3.4, 2.2, 3.0],
+    ];
+
+    this.swarmDroplets.length = 0;
+    rings.forEach((ring, ringIdx) => {
+      const sizes = ringRadii[ringIdx] ?? [2.5, 2.0, 2.5, 2.0];
+      for (let k = 0; k < ring.count; k++) {
+        const totalIdx = ringIdx * ring.count + k;
+        this.swarmDroplets.push({
+          ring,
+          phase: (k / ring.count) * Math.PI * 2,
+          baseRadius: (sizes[k % sizes.length] ?? 2.5) * scale,
+          spawnAngle: totalIdx * 2.399963,
+          spawnRadius: (6 + (totalIdx % 4) * 4) * scale,
+          spawnDelay: totalIdx * 0.045,
+          curX: 0,
+          curY: 0,
+          currentRadius: 0,
+          migration: 0,
+          originX: 0,
+          originY: 0,
+          deflectX: 0,
+          deflectY: 0,
+        });
+      }
+    });
+  }
+
+  private updateSwarm(s: number, dtMs: number): void {
+    const targetSwarm = this.hasAnchor && this.pointer.isInside ? 1.0 : 0.0;
+    const swarmEase = targetSwarm > 0.5 ? 0.075 : 0.085;
+    this.swarmActive += (targetSwarm - this.swarmActive) * (1.0 - (1.0 - swarmEase) ** s);
+    if (Math.abs(this.swarmActive - targetSwarm) < 0.001) {
+      this.swarmActive = targetSwarm;
+    }
+    this.updateAnchor(s);
+    if (this.swarmActive > 0.0005) {
+      this.swarmTime += dtMs * 0.001 * 1.8;
+    }
+    this.swarmEase.migIn = 1.0 - (1.0 - 0.065) ** s;
+    this.swarmEase.migOut = 1.0 - (1.0 - 0.085) ** s;
+    this.swarmEase.rEase = 1.0 - (1.0 - 0.12) ** s;
+    this.swarmEase.defEase = 1.0 - (1.0 - 0.18) ** s;
+    for (const d of this.swarmDroplets) {
+      this.stepSwarmDroplet(d);
+    }
+  }
+
+  private updateAnchor(s: number): void {
+    if (!this.hasAnchor) return;
+    const anchorEase = 1.0 - (1.0 - 0.2) ** s;
+    this.anchorX += (this.targetAnchorX - this.anchorX) * anchorEase;
+    this.anchorY += (this.targetAnchorY - this.anchorY) * anchorEase;
+  }
+
+  private updateDropletOrigin(d: SwarmDroplet): void {
+    if (this.hasAnchor && d.migration < 0.001) {
+      d.originX = this.pointer.x + Math.cos(d.spawnAngle) * d.spawnRadius;
+      d.originY = this.pointer.y + Math.sin(d.spawnAngle) * d.spawnRadius;
+    } else if (!this.hasAnchor && this.pointer.isInside) {
+      d.originX = this.pointer.x + Math.cos(d.spawnAngle) * d.spawnRadius;
+      d.originY = this.pointer.y + Math.sin(d.spawnAngle) * d.spawnRadius;
+    }
+  }
+
+  private updateDropletMigration(d: SwarmDroplet): void {
+    const effectiveActive = Math.max(0.0, this.swarmActive - d.spawnDelay);
+    const targetMig = this.hasAnchor && effectiveActive > 0 ? 1.0 : 0.0;
+    const factor = targetMig > 0.5 ? this.swarmEase.migIn : this.swarmEase.migOut;
+    d.migration += (targetMig - d.migration) * factor;
+    if (!this.hasAnchor && d.migration < 0.01) d.migration = 0.0;
+  }
+
+  private stepSwarmDroplet(d: SwarmDroplet): void {
+    this.updateDropletOrigin(d);
+    this.updateDropletMigration(d);
+
+    const m = Math.max(0.0, Math.min(1.0, d.migration));
+    const easeM = 0.5 - 0.5 * Math.cos(m * Math.PI);
+
+    const th = d.phase + this.swarmTime * d.ring.speed;
+    const u = d.ring.r * Math.cos(th);
+    const v = d.ring.r * Math.sin(th);
+    const xPrime = u;
+    const yPrime = v * Math.cos(d.ring.beta);
+    const zPrime = v * Math.sin(d.ring.beta);
+
+    const xOrbit = xPrime * Math.cos(d.ring.alpha) - yPrime * Math.sin(d.ring.alpha);
+    const yOrbit = xPrime * Math.sin(d.ring.alpha) + yPrime * Math.cos(d.ring.alpha);
+
+    d.curX = (1.0 - easeM) * d.originX + easeM * (this.anchorX + xOrbit);
+    d.curY = (1.0 - easeM) * d.originY + easeM * (this.anchorY + yOrbit);
+
+    this.deflectSwarmDroplet(d, easeM);
+
+    // Глубина zPrime: перед звездой (zPrime > 0) капля больше, за звездой (zPrime < 0) — заметно меньше
+    const zNorm = d.ring.r > 0 ? zPrime / d.ring.r : 0;
+    const depthScale = Math.max(0.35, Math.min(1.3, 0.85 + 0.45 * zNorm));
+    this.growSwarmDroplet(d, m, depthScale);
+  }
+
+  private deflectSwarmDroplet(d: SwarmDroplet, easeM: number): void {
+    let targetDefX = 0;
+    let targetDefY = 0;
+    if (this.pointer.isInside && easeM > 0.5) {
+      const ddx = d.curX - this.pointer.x;
+      const ddy = d.curY - this.pointer.y;
+      const dist = Math.hypot(ddx, ddy);
+      const reactRadius = 45;
+      if (dist < reactRadius) {
+        const prox = 1.0 - dist / reactRadius;
+        targetDefX = this.pointer.vx * 0.25 * prox;
+        targetDefY = this.pointer.vy * 0.25 * prox;
+      }
+    }
+    d.deflectX += (targetDefX - d.deflectX) * this.swarmEase.defEase;
+    d.deflectY += (targetDefY - d.deflectY) * this.swarmEase.defEase;
+    d.curX += d.deflectX;
+    d.curY += d.deflectY;
+  }
+
+  private growSwarmDroplet(d: SwarmDroplet, m: number, depthScale: number): void {
+    const bloom = Math.min(1.0, m * 2.2);
+    const presence = this.hasAnchor ? 1.0 : this.swarmActive;
+    const targetR = d.baseRadius * presence * (0.55 + bloom * 0.45) * depthScale;
+    d.currentRadius += (targetR - d.currentRadius) * this.swarmEase.rEase;
+    if (d.currentRadius < 0.05) d.currentRadius = 0.0;
+  }
+
   /** Одна капля поля за кадр. Возвращает false, если капля растаяла и выходит из работы. */
   private stepDot(i: number, s: number): boolean {
     const { target } = this;
@@ -333,8 +563,12 @@ export class CursorField {
     const e = Math.min(1, (this.fe[i] ?? 0) + (1 - (this.fe[i] ?? 0)) * (1 - (1 - emerge) ** s));
     this.fe[i] = e;
     const minR = Math.max(0.8, config.maxRadius * 0.15);
+    const swarmFade = Math.max(0, 1 - this.swarmActive);
     this.ft[i] =
-      (minR + (config.maxRadius - minR) * proximity ** 1.25) * sf * (e + Math.sin(e * Math.PI) * 0.2);
+      (minR + (config.maxRadius - minR) * proximity ** 1.25) *
+      sf *
+      (e + Math.sin(e * Math.PI) * 0.2) *
+      swarmFade;
     if (pointer.speed <= 0.4) return;
     target.x = this.shiftX * proximity;
     target.y = this.shiftY * proximity;
@@ -413,7 +647,7 @@ export class CursorField {
     this.fe[i] = 0;
   }
 
-  /** Самые крупные MAX_CURSOR_DOTS капель — в массив для шейдера, остальные сбрасываются. */
+  /** Самые крупные MAX_CURSOR_DOTS капель (поле + орбитальный рой) — в массив для шейдера. */
   private pack(): void {
     if (this.active.length > MAX_CURSOR_DOTS) {
       this.active.sort(this.byRadiusDesc);
@@ -424,12 +658,43 @@ export class CursorField {
     this.minY = 1e5;
     this.maxX = -1e5;
     this.maxY = -1e5;
-    this.active.forEach((i, n) => this.packDot(i, n));
-    this.bbox[0] = this.minX;
-    this.bbox[1] = this.minY;
-    this.bbox[2] = this.maxX;
-    this.bbox[3] = this.maxY;
-    this.dotCount = this.active.length;
+    let count = 0;
+    for (const i of this.active) {
+      if (count >= MAX_CURSOR_DOTS) break;
+      this.packDot(i, count++);
+    }
+    for (const d of this.swarmDroplets) {
+      if (d.currentRadius <= 0.05 || count >= MAX_CURSOR_DOTS) continue;
+      this.packSwarmDot(d, count++);
+    }
+    this.dotCount = count;
+    if (count > 0) {
+      this.bbox[0] = this.minX;
+      this.bbox[1] = this.minY;
+      this.bbox[2] = this.maxX;
+      this.bbox[3] = this.maxY;
+    } else {
+      this.bbox[0] = 0;
+      this.bbox[1] = 0;
+      this.bbox[2] = 0;
+      this.bbox[3] = 0;
+    }
+  }
+
+  private packSwarmDot(d: SwarmDroplet, n: number): void {
+    const x = d.curX;
+    const y = d.curY;
+    const r = d.currentRadius;
+    const pad = r + 32;
+    const at = n * 4;
+    this.dots[at] = x;
+    this.dots[at + 1] = y;
+    this.dots[at + 2] = r;
+    this.dots[at + 3] = 0;
+    this.minX = Math.min(this.minX, x - pad);
+    this.minY = Math.min(this.minY, y - pad);
+    this.maxX = Math.max(this.maxX, x + pad);
+    this.maxY = Math.max(this.maxY, y + pad);
   }
 
   private packDot(i: number, n: number): void {

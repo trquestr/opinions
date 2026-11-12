@@ -16,7 +16,7 @@ export interface NightPhrase {
 }
 
 export const NIGHT_PHRASES: readonly NightPhrase[] = [
-  { text: 'Эти семь точек видели все.', from: 0, to: 0.8 },
+  { text: 'Эти семь точек видели все.', from: 0.18, to: 0.8 },
   // Н2–Н5: стороны чередуются (решено владельцем 2026-11-11), камера ставит фигуру напротив текста
   { text: 'Греки видели здесь медведицу.', from: 0.8, to: 1.6, figure: 1, side: 'right' },
   { text: 'Англичане — плуг.', from: 1.6, to: 2.4, figure: 2, side: 'left' },

@@ -16,8 +16,8 @@ import { buildProgram } from './gl-program';
  * Пунктир — два слоя зёрен на сетке со случайным сдвигом (крупный и мелкий). Зерно i просыпается на своём пороге
  * τ_i и растёт: r_i = mix(−0.25, R_i, smoothstep(0, 0.32, t − τ_i)) (в долях ячейки; отрицательный радиус — зерна нет).
  * Зёрна сливаются, как мокрая тушь, гладким максимумом:
- *   f = ln(Σ exp(k·(r_i − d_i))) / k + C(t),   C(t) = 0.9·smoothstep(0.62, 0.97, t)
- * Покрытие = smoothstep(−a, a, f). Подъём C затягивает последние просветы: при t ≥ 0.97 тушь сплошная.
+ *   f = ln(Σ exp(k·(r_i − d_i))) / k + C(t),   C(t) = 0.9·smoothstep(0.78, 0.99, t)
+ * Покрытие = smoothstep(−a, a, f). Подъём C отложен к концу полосы, чтобы точки дольше росли и переходили в чёрное.
  *
  * Искры — редкие точки, которые тушь не закрывает никогда (покрытие там падает до 0.08, это цвет светлой туши
  * #ecece8). На белом их не видно; когда вокруг смыкается тушь, они остаются светлой пылью — из неё складывается
@@ -48,7 +48,7 @@ uniform float uTime;
 out vec4 fragColor;
 
 const vec3 VEIL_COLOR = vec3(244.0, 244.0, 242.0) / 255.0;
-const float BAND = 0.9;
+const float BAND = 1.35;
 const float WARP = 0.24;
 const float MERGE = 12.0;
 const float SPECK_FLOOR = 0.08;
@@ -85,12 +85,12 @@ float stipple(vec2 p, float tone, vec2 wake, float cellPx) {
       vec2 offset = vec2(float(i), float(j));
       vec3 h = hash3(cell + offset);
       vec2 center = offset + 0.5 + (h.xy - 0.5) * 0.8;
-      float grow = smoothstep(0.0, 0.32, tone - (wake.x + wake.y * h.z));
+      float grow = smoothstep(0.0, 0.44, tone - (wake.x + wake.y * h.z));
       float radius = mix(-0.25, 0.4 + 0.32 * fract(h.z * 7.13), grow);
       sum += exp(MERGE * (radius - length(f - center)));
     }
   }
-  float field = log(sum) / MERGE + 0.9 * smoothstep(0.62, 0.97, tone);
+  float field = log(sum) / MERGE + 0.9 * smoothstep(0.78, 0.99, tone);
   float edge = 0.8 / (cellPx * uDpr);
   return smoothstep(-edge, edge, field);
 }
@@ -124,8 +124,8 @@ void main() {
   if (tone < 1.0) {
     float coarseCell = 10.0 * uGrain;
     float fineCell = 5.0 * uGrain;
-    float coarse = stipple((px + vec2(0.0, uTime * 9.0)) / coarseCell, tone, vec2(0.02, 0.5), coarseCell);
-    float fine = stipple((px + vec2(13.7, uTime * 5.0)) / fineCell, tone, vec2(0.22, 0.43), fineCell);
+    float coarse = stipple((px + vec2(0.0, uTime * 9.0)) / coarseCell, tone, vec2(0.02, 0.56), coarseCell);
+    float fine = stipple((px + vec2(13.7, uTime * 5.0)) / fineCell, tone, vec2(0.18, 0.52), fineCell);
     ink = max(coarse, fine);
   }
   ink *= 1.0 - (1.0 - SPECK_FLOOR) * specks(px + vec2(0.0, uTime * 3.0));

@@ -111,8 +111,8 @@ describe('clouds timeline', () => {
     });
 
     it('облака уходят к приходу ночной сцены', () => {
-      expect(frameAt(2.72).cloudsVisibility).toBe(1);
-      expect(frameAt(2.9).cloudsVisibility).toBe(0);
+      expect(frameAt(2.45).cloudsVisibility).toBe(1);
+      expect(frameAt(2.92).cloudsVisibility).toBe(0);
     });
   });
 });

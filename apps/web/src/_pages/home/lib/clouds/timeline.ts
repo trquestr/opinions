@@ -41,6 +41,10 @@ export function ramp(u: number, a: number, b: number): number {
   return Math.min(1, Math.max(0, (u - a) / (b - a)));
 }
 
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
 interface Window {
   readonly from: number;
   readonly to: number;
@@ -69,15 +73,15 @@ export function frameAt(u: number): CloudsFrame {
   // Камера поднимается сквозь эшелоны облаков от z=0 до z=2.95
   const zCam = ramp(u, 0.45, 3.0) * 2.95;
 
-  // Облака проявляются после влёта в чашу буквы U (О2) и уходят к приходу ночной сцены
-  const cloudsVisibility = ramp(u, 0.35, 0.65) * (1 - ramp(u, 2.72, 2.9));
+  // Облака проявляются после влёта в чашу буквы U (О2) и мягко тают под вуалью к приходу ночной сцены
+  const cloudsVisibility = ramp(u, 0.35, 0.65) * (1 - smooth(ramp(u, 2.45, 2.92)));
 
   // Капли: горсть с появлением облаков, с О4 (1,3 экрана) их всё больше и они всплывают быстрее
   const dropsVisibility = ramp(u, 0.45, 0.8);
   const rainUp = ramp(u, 1.25, 2.1);
   const dropsFraction = 0.3 + 0.7 * rainUp;
 
-  // О6: вуаль сумерек; под ней капли замедляются и повисают
+  // О6: вуаль сумерек (без smoothstep — чтобы середина полосы, где точки переходят в чёрное, не ускорялась)
   const veil = ramp(u, VEIL_START, VEIL_END);
   const rise = (0.35 + 0.65 * rainUp) * (1 - 0.8 * veil);
 

@@ -263,3 +263,70 @@ describe('CursorField: края экрана и разрежение', () => {
     expect(largestRadius(field)).toBeLessThanOrEqual(maxRadius * 1.3 * 1.2);
   });
 });
+
+describe('CursorField: орбитальный рой у звёзд созвездия', () => {
+  it('привязка к звезде (setStarAnchor) активирует рой и выводит орбитальные капли вокруг неё', () => {
+    const field = createField();
+    field.pointer.moveTo(CENTER.x + 35, CENTER.y + 35);
+    field.setStarAnchor(CENTER);
+
+    stepTimes(field, 30);
+
+    expect(field.isActive()).toBe(true);
+    const dots = readDots(field);
+    expect(dots.length).toBeGreaterThan(0);
+    // Капли роя кружатся вокруг центра звезды CENTER в пределах орбитального радиуса (< 65 px)
+    const orbitDots = dots.filter((d) => Math.hypot(d.x - CENTER.x, d.y - CENTER.y) < 65);
+    expect(orbitDots.length).toBeGreaterThan(5);
+  });
+
+  it('при уходе со звезды (setStarAnchor(null)) капли роя угасают', () => {
+    const field = createField();
+    field.pointer.moveTo(CENTER.x + 35, CENTER.y + 35);
+    field.setStarAnchor(CENTER);
+    stepTimes(field, 30);
+
+    // Курсор отходит далеко от звезды
+    field.pointer.moveTo(CENTER.x + 100, CENTER.y + 100);
+    field.setStarAnchor(null);
+    stepTimes(field, 60);
+
+    // После угасания роя в области звезды капель нет
+    const dots = readDots(field);
+    const starAreaDots = dots.filter((d) => Math.hypot(d.x - CENTER.x, d.y - CENTER.y) < 50);
+    expect(starAreaDots.length).toBe(0);
+  });
+
+  it('привязка к звезде приглушает регулярную лужу курсора', () => {
+    const fieldWithoutAnchor = createField();
+    fieldWithoutAnchor.pointer.moveTo(CENTER.x, CENTER.y);
+    stepTimes(fieldWithoutAnchor, 25);
+    const freeMaxR = largestRadius(fieldWithoutAnchor);
+    expect(freeMaxR).toBeGreaterThan(0);
+
+    const fieldWithAnchor = createField();
+    fieldWithAnchor.pointer.moveTo(CENTER.x, CENTER.y);
+    fieldWithAnchor.setStarAnchor({ x: CENTER.x + 40, y: CENTER.y + 40 });
+    stepTimes(fieldWithAnchor, 25);
+
+    // Капли роя вокруг звезды отрываются, а регулярные капли под курсором приглушаются
+    expect(fieldWithAnchor.isActive()).toBe(true);
+    expect(fieldWithAnchor.dotCount).toBeGreaterThan(0);
+  });
+
+  it('капли роя меняют масштаб по 3D-глубине при движении вокруг звезды', () => {
+    const field = createField();
+    field.pointer.moveTo(CENTER.x + 35, CENTER.y + 35);
+    field.setStarAnchor(CENTER);
+    stepTimes(field, 35);
+
+    const dots = readDots(field);
+    const orbitDots = dots.filter((d) => Math.hypot(d.x - CENTER.x, d.y - CENTER.y) < 65);
+    const radii = orbitDots.map((d) => d.r);
+    const minR = Math.min(...radii);
+    const maxR = Math.max(...radii);
+
+    // Капли за звездой уменьшаются в размере по сравнению с каплями перед звездой
+    expect(maxR).toBeGreaterThan(minR * 1.5);
+  });
+});

@@ -1,39 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createDetailMotion,
   createDetailSlot,
-  DETAIL_ALPHA,
-  detailDirection,
+  detailFade,
   detailOpacity,
-  detailVisibility,
+  detailOutFade,
+  MAX_DETAIL_OPACITY,
   placeDetail,
-  solidValue,
+  shiftDetail,
 } from './details';
-import { Projector } from './projection';
+import { DetailsLayer } from './details-layer';
 import { frameAt } from './timeline';
-import type { NightFrame } from './timeline';
 import type { NightDetail } from '../../model/night-details';
 
-/** Обзорная поза: камера смотрит прямо вперёд, опора в центре экрана 1000×800. */
-function createProjector(): Projector {
-  const projector = new Projector();
-  projector.setView(1000, 800);
-  projector.setPose({
-    yaw: 0,
-    pitch: 0,
-    distance: 100,
-    targetX: 0,
-    targetY: 0,
-    targetZ: 0,
-    anchorX: 500,
-    anchorY: 400,
-    skyYaw: 0,
-    skyPitch: 0,
-  });
-  return projector;
-}
+const VIEW = { width: 1440, height: 900 };
 
 function nightDetail(patch: Partial<NightDetail> = {}): NightDetail {
-  return { name: 'test', yawDeg: 0, pitchDeg: 0, widthDeg: 10, ...patch };
+  return { name: 'test', figure: 1, corner: 'top-left', widthPx: 300, ...patch };
 }
 
 function loadedSlot(aspect: number) {
@@ -42,106 +25,173 @@ function loadedSlot(aspect: number) {
   return slot;
 }
 
-/** Кадр с заданной видимостью неба; остальное — из таймлайна. */
-function frameWith(patch: Partial<NightFrame>): NightFrame {
-  return { ...frameAt(0), ...patch };
+function detailImage(index: number): HTMLImageElement {
+  const image = document.createElement('img');
+  image.dataset.index = String(index);
+  Object.defineProperty(image, 'naturalWidth', { value: 800 });
+  Object.defineProperty(image, 'naturalHeight', { value: 800 });
+  return image;
 }
 
 describe('placeDetail', () => {
-  it('направление прямо вперёд ложится в центр экрана, ширина = f · tg(угол)', () => {
-    const projector = createProjector();
+  it('угол top-left позиционирует деталь от верхнего левого края', () => {
     const slot = loadedSlot(1);
 
-    placeDetail(projector, nightDetail(), slot);
+    placeDetail(VIEW, nightDetail({ corner: 'top-left', offset: [20, 10], widthPx: 300 }), slot);
 
-    const width = projector.focal * Math.tan((10 * Math.PI) / 180);
-    expect(slot.widthPx).toBeCloseTo(width);
-    expect(slot.x + slot.widthPx / 2).toBeCloseTo(500);
-    expect(slot.y + slot.widthPx / 2).toBeCloseTo(400);
-    expect(slot.isVisible).toBe(true);
+    expect(slot).toMatchObject({ x: 20, y: 10, widthPx: 300, isVisible: true });
   });
 
-  it('высота берётся из пропорций картинки: широкая деталь стоит по центру своей высоты', () => {
+  it('угол bottom-right позиционирует деталь от правого нижнего края', () => {
     const slot = loadedSlot(2);
 
-    placeDetail(createProjector(), nightDetail(), slot);
+    placeDetail(VIEW, nightDetail({ corner: 'bottom-right', widthPx: 400 }), slot);
 
-    expect(slot.y + slot.widthPx / 2 / 2).toBeCloseTo(400);
+    expect(slot.x).toBe(1440 - 400);
+    expect(slot.y).toBe(900 - 200);
   });
 
-  it('положительное рыскание уводит деталь вправо, положительный тангаж — вниз', () => {
+  it('смещение offset выводит деталь за край экрана', () => {
     const slot = loadedSlot(1);
 
-    placeDetail(createProjector(), nightDetail({ yawDeg: 20, pitchDeg: 10 }), slot);
+    placeDetail(VIEW, nightDetail({ corner: 'bottom-right', offset: [20, 20], widthPx: 300 }), slot);
 
-    expect(slot.x + slot.widthPx / 2).toBeGreaterThan(500);
-    expect(slot.y + slot.widthPx / 2).toBeGreaterThan(400);
+    expect(slot.x).toBe(1440 - 300 + 20);
+    expect(slot.y).toBe(900 - 300 + 20);
   });
 
-  it('деталь за спиной камеры скрыта', () => {
-    const slot = loadedSlot(1);
+  it('сдвиг движения камеры прибавляется к положению (входящая и уходящая фигуры раздельно)', () => {
+    const slotIn = loadedSlot(1);
+    const slotOut = loadedSlot(1);
+    const detailIn = nightDetail({ figure: 2, offset: [20, 10] });
+    const detailOut = nightDetail({ figure: 1, offset: [20, 10] });
+    const motion = {
+      ...createDetailMotion(),
+      shiftX: -120,
+      shiftY: 40,
+      leavingFigure: 1,
+      leavingShiftX: 85,
+      leavingShiftY: -25,
+    };
 
-    placeDetail(createProjector(), nightDetail({ yawDeg: 170 }), slot);
+    placeDetail(VIEW, detailIn, slotIn);
+    placeDetail(VIEW, detailOut, slotOut);
+    shiftDetail(slotIn, detailIn, motion);
+    shiftDetail(slotOut, detailOut, motion);
 
-    expect(slot.isVisible).toBe(false);
+    expect(slotIn.x).toBe(20 - 120);
+    expect(slotIn.y).toBe(10 + 40);
+    expect(slotOut.x).toBe(20 + 85);
+    expect(slotOut.y).toBe(10 - 25);
   });
 
-  it('пока картинка не загружена (aspect = 0), деталь не видна и не даёт NaN', () => {
+  it('пока картинка не загружена (aspect = 0), деталь не видна', () => {
     const slot = createDetailSlot();
 
-    placeDetail(createProjector(), nightDetail(), slot);
+    placeDetail(VIEW, nightDetail(), slot);
 
     expect(slot.isVisible).toBe(false);
-    expect(Number.isFinite(slot.y)).toBe(true);
   });
 });
 
-describe('detailDirection', () => {
-  it('нулевые углы дают взгляд вперёд (0, 0, 1)', () => {
-    const out = { x: 9, y: 9, z: 9 };
+describe('detailOpacity, detailFade и detailOutFade', () => {
+  it('деталь своей фигуры видна вместе с фразой, умноженной на проявление и потолок яркости', () => {
+    const bearFrame = frameAt(1.2);
+    const full = createDetailMotion();
+    const half = { ...createDetailMotion(), fade: 0.5 };
 
-    detailDirection(nightDetail(), out);
-
-    expect(out).toEqual({ x: 0, y: 0, z: 1 });
+    expect(detailOpacity(bearFrame, nightDetail({ figure: 1 }), full)).toBeCloseTo(MAX_DETAIL_OPACITY);
+    expect(detailOpacity(bearFrame, nightDetail({ figure: 1 }), half)).toBeCloseTo(0.5 * MAX_DETAIL_OPACITY);
+    expect(detailOpacity(bearFrame, nightDetail({ figure: 1, alpha: 0.85 }), full)).toBeCloseTo(0.85);
+    expect(detailOpacity(bearFrame, nightDetail({ figure: 2 }), full)).toBe(0);
   });
 
-  it('рыскание 90° даёт направление строго вправо', () => {
-    const out = { x: 0, y: 0, z: 0 };
+  it('уходящая фигура остаётся видимой по leavingFade, даже когда фраза в таймлайне уже обнулилась', () => {
+    const ploughFrame = frameAt(2.0);
+    const motion = { ...createDetailMotion(), fade: 0.4, leavingFigure: 1, leavingFade: 0.6 };
 
-    detailDirection(nightDetail({ yawDeg: 90 }), out);
+    expect(detailOpacity(ploughFrame, nightDetail({ figure: 1 }), motion)).toBeCloseTo(
+      0.6 * MAX_DETAIL_OPACITY,
+    );
+    expect(detailOpacity(ploughFrame, nightDetail({ figure: 2 }), motion)).toBeCloseTo(
+      0.4 * MAX_DETAIL_OPACITY,
+    );
+  });
 
-    expect(out.x).toBeCloseTo(1);
-    expect(out.z).toBeCloseTo(0);
+  it('в общем плане детали скрыты', () => {
+    expect(detailOpacity(frameAt(0.4), nightDetail({ figure: 1 }), createDetailMotion())).toBe(0);
+  });
+
+  it('проявление начинается на четверти хода камеры и плавно доходит до 1', () => {
+    expect(detailFade(0)).toBe(0);
+    expect(detailFade(0.25)).toBe(0);
+    expect(detailFade(0.625)).toBeCloseTo(0.5);
+    expect(detailFade(1)).toBe(1);
+  });
+
+  it('угасание уходящей фигуры начинается с 1 и доходит до 0 на трёх четвертях хода', () => {
+    expect(detailOutFade(0)).toBe(1);
+    expect(detailOutFade(0.375)).toBeCloseTo(0.5);
+    expect(detailOutFade(0.75)).toBe(0);
+    expect(detailOutFade(1)).toBe(0);
   });
 });
 
-describe('прозрачность деталей', () => {
-  it('деталь = видимость неба × потолок', () => {
-    expect(detailOpacity(frameWith({ sky: 0.5 }), nightDetail())).toBeCloseTo(0.5 * DETAIL_ALPHA);
-    expect(detailOpacity(frameWith({ sky: 1 }), nightDetail())).toBeCloseTo(DETAIL_ALPHA);
-    expect(detailOpacity(frameWith({ sky: 0 }), nightDetail())).toBe(0);
+describe('DetailsLayer', () => {
+  it('применяет scaleX(-1) для деталей с flipX', () => {
+    const image = detailImage(1); // ionic-capital (flipX)
+
+    new DetailsLayer([image]).update(VIEW, frameAt(1.2), createDetailMotion());
+
+    expect(image.style.transform).toContain('scaleX(-1)');
+    expect(image.style.visibility).toBe('visible');
+    expect(image.style.opacity).toBe(String(MAX_DETAIL_OPACITY));
   });
 
-  it('собственная яркость детали (alpha) множит её прозрачность', () => {
-    expect(detailOpacity(frameWith({ sky: 1 }), nightDetail({ alpha: 0.6 }))).toBeCloseTo(DETAIL_ALPHA * 0.6);
+  it('без flipX зеркала нет, но поворот rotationDeg применяется', () => {
+    const image = detailImage(2); // wheat (rotationDeg: 25)
+
+    new DetailsLayer([image]).update(VIEW, frameAt(2.0), createDetailMotion());
+
+    expect(image.style.transform).not.toContain('scaleX(-1)');
+    expect(image.style.transform).toContain('rotate(25deg)');
   });
 
-  it('усиленная деталь не становится прозрачнее единицы', () => {
-    expect(detailOpacity(frameWith({ sky: 1 }), nightDetail({ alpha: 5 }))).toBe(1);
+  it('проявление по ходу камеры множит прозрачность', () => {
+    const image = detailImage(0);
+
+    new DetailsLayer([image]).update(VIEW, frameAt(1.2), { ...createDetailMotion(), fade: 0.5 });
+
+    expect(image.style.opacity).toBe(String(Math.round(0.5 * MAX_DETAIL_OPACITY * 100) / 100));
   });
 
-  it('видимость — значение sky таймлайна, от фигуры не зависит', () => {
-    expect(detailVisibility(frameWith({ sky: 0.4, figure: 3 }))).toBe(0.4);
-  });
-});
+  it('при нулевом проявлении деталь скрыта', () => {
+    const image = detailImage(0);
+    const layer = new DetailsLayer([image]);
+    layer.update(VIEW, frameAt(1.2), createDetailMotion());
 
-describe('solidValue', () => {
-  it('до половины видимости сплошной части нет, дальше она растёт до потолка подложки', () => {
-    expect([0, 0.25, 0.5, 0.75, 1].map(solidValue)).toEqual([0, 0, 0, 0.06, 0.12]);
+    layer.update(VIEW, frameAt(1.2), { ...createDetailMotion(), fade: 0 });
+
+    expect(image.style.visibility).toBe('hidden');
   });
 
-  it('значения вне диапазона обрезаются', () => {
-    expect(solidValue(-1)).toBe(0);
-    expect(solidValue(3)).toBe(0.12);
+  it('уходящая деталь сдвигается на leavingShift и гаснет по leavingFade', () => {
+    const bearImage = detailImage(0); // figure 1
+    const layer = new DetailsLayer([bearImage]);
+    layer.update(VIEW, frameAt(1.2), createDetailMotion());
+    const startTransform = bearImage.style.transform;
+
+    layer.update(VIEW, frameAt(2.0), {
+      ...createDetailMotion(),
+      fade: 0.3,
+      leavingFigure: 1,
+      leavingFade: 0.7,
+      leavingShiftX: 90,
+      leavingShiftY: -30,
+    });
+
+    expect(bearImage.style.visibility).toBe('visible');
+    expect(bearImage.style.opacity).toBe(String(Math.round(0.7 * MAX_DETAIL_OPACITY * 100) / 100));
+    expect(bearImage.style.transform).not.toBe(startTransform);
   });
 });

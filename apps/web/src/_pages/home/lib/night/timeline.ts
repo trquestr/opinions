@@ -68,6 +68,10 @@ export function ramp(u: number, a: number, b: number): number {
   return Math.min(1, Math.max(0, (u - a) / (b - a)));
 }
 
+function smooth(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
 interface Window {
   readonly from: number;
   readonly to: number;
@@ -85,10 +89,10 @@ function figureAt(u: number): number {
 
 export function frameAt(u: number): NightFrame {
   return {
-    stage: ramp(u, -DAY_TO_NIGHT_SCREENS, 0),
-    // Н1: сначала фоновые звёзды, потом семь ярких, потом гравюры на небе
-    backgroundStars: ramp(u, 0, 0.3),
-    dipperStars: ramp(u, 0.2, 0.5),
+    stage: smooth(ramp(u, -DAY_TO_NIGHT_SCREENS, 0)),
+    // Н1: сначала фоновые звёзды, потом семь ярких, потом гравюры на небе (вход по smoothstep без скачка)
+    backgroundStars: smooth(ramp(u, 0, 0.45)),
+    dipperStars: smooth(ramp(u, 0.15, 0.55)),
     sky: ramp(u, 0.3, 0.8),
     figure: figureAt(u),
     outline: windowOpacity(u, OUTLINE_WINDOW),

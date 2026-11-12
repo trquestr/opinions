@@ -1,6 +1,7 @@
 import { NIGHT_PHRASES } from '../../model/night-script';
 import manifest from './night-manifest.json';
 import type { Bounds, Layout, Point, Size } from './layout';
+import { SKY_FOLLOW } from './projection';
 import type { CameraPose } from './projection';
 
 /*
@@ -251,6 +252,25 @@ export class Camera {
   /** Доля пройденного хода к текущей цели, 0…1 (1 — камера пришла). */
   progress(nowMs: number): number {
     return Math.min(1, Math.max(0, (nowMs - this.startMs) / CAMERA_MS));
+  }
+
+  /**
+   * Отставание неба от цели хода, рад: углы неба базового ракурса (без стоянки, покачивания и взгляда за курсором)
+   * минус углы неба цели. ψ_неба = ψ·SKY_FOLLOW + skyYaw, θ_неба = θ·SKY_FOLLOW + skyPitch (projection.ts).
+   * Пишет в out; когда камера пришла — (0, 0).
+   */
+  skyLag(out: { yaw: number; pitch: number }): void {
+    out.yaw = (this.base.yaw - this.to.yaw) * SKY_FOLLOW + (this.base.skyYaw - this.to.skyYaw);
+    out.pitch = (this.base.pitch - this.to.pitch) * SKY_FOLLOW + (this.base.skyPitch - this.to.skyPitch);
+  }
+
+  /**
+   * Сдвиг неба от начала хода (from), рад: базовый ракурс минус стартовый ракурс перехода.
+   * На старте (0, 0), к концу хода совпадает с общим поворотом неба — уходящие детали плывут в ту же сторону.
+   */
+  skyDrift(out: { yaw: number; pitch: number }): void {
+    out.yaw = (this.base.yaw - this.from.yaw) * SKY_FOLLOW + (this.base.skyYaw - this.from.skyYaw);
+    out.pitch = (this.base.pitch - this.from.pitch) * SKY_FOLLOW + (this.base.skyPitch - this.from.skyPitch);
   }
 
   /**

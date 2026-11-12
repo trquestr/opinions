@@ -36,7 +36,6 @@ NAMES = [
     "detail-xiangyun",
     "detail-dune",
     "detail-crescent",
-    "detail-lantern",
 ]
 
 BLACK_POINT = 20

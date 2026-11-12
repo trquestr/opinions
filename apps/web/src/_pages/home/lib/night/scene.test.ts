@@ -5,6 +5,7 @@ import manifest from './night-manifest.json';
 import { Projector } from './projection';
 import { Cursor } from './cursor';
 import { CursorField } from './cursor-field';
+import { MAX_DETAIL_OPACITY } from './details';
 import { FINISH_IDLE_MS } from './drawing';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
@@ -716,23 +717,25 @@ describe('startNightScene: гравюрные детали', () => {
 
     const [first, second] = elements.details;
     expect(first?.style.visibility).toBe('visible');
-    expect(first?.style.transform).toMatch(/^translate3d\(.+px, .+px, 0(px)?\)$/);
-    expect(first?.style.opacity).toBe('0.7');
-    expect(first?.style.getPropertyValue('--solid')).toBe('0.12');
+    expect(first?.style.transform).toMatch(
+      /^translate3d\(.+px, .+px, 0(px)?\)(?: rotate\(-?\d+deg\))?(?: scaleX\(-1\))?$/,
+    );
+    expect(first?.style.opacity).toBe(String(MAX_DETAIL_OPACITY));
     expect(second?.style.visibility).toBe('visible');
   });
 
-  it('при смене фигуры детали не гаснут: из кадра их выводит только поворот неба', () => {
+  it('при смене фигуры отображаются только детали активной фигуры', () => {
     const elements = buildElements();
     start(elements);
     scrollTo(1.25);
     flushFrames();
 
+    expect(elements.details[0]?.style.visibility).toBe('visible');
+
     scrollTo(2.75);
     flushFrames();
 
-    expect(elements.details[0]?.style.opacity).toBe('0.7');
-    expect(elements.details[0]?.style.visibility).toBe('visible');
+    expect(elements.details[0]?.style.visibility).toBe('hidden');
   });
 
   it('при возврате к началу сцены детали прячутся', () => {
@@ -767,6 +770,21 @@ describe('startNightScene: гравюрные детали', () => {
     scrollTo(1.25);
 
     expect(elements.details[0]?.style.visibility).not.toBe('visible');
+  });
+
+  it('при движении курсора видимые детали сдвигаются вместе с небом', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushFrames();
+    const restTransform = elements.details[0]?.style.transform;
+
+    window.dispatchEvent(
+      Object.assign(new MouseEvent('pointermove', { clientX: 1000, clientY: 0 }), { pointerType: 'mouse' }),
+    );
+    Array.from({ length: 40 }, (_, k) => k).forEach((k) => flushAt(1000 + 50 * k));
+
+    expect(elements.details[0]?.style.transform).not.toBe(restTransform);
   });
 });
 

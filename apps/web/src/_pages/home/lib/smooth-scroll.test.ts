@@ -16,7 +16,7 @@ function stubMedia(matching: string[] = []): void {
 }
 
 /** Прокручивает время вперёд кадрами по 16 мс, пока анимация не закончится. */
-function runFrames(maxMs = 5000): void {
+function runFrames(maxMs = 10000): void {
   const end = now + maxMs;
   while (frames.length > 0 && now < end) {
     now += 16;
@@ -54,8 +54,12 @@ describe('nextStop', () => {
 });
 
 describe('stepDurationMs', () => {
-  it('пропорциональна пути', () => {
+  it('пропорциональна пути в пределах одного экрана', () => {
     expect(stepDurationMs(1000, 1000)).toBe(2200);
+  });
+
+  it('межсценовый переход длиннее экрана замедляется', () => {
+    expect(stepDurationMs(1500, 1000)).toBe(8500);
   });
 
   it('не короче минимума', () => {
@@ -63,7 +67,7 @@ describe('stepDurationMs', () => {
   });
 
   it('не длиннее максимума', () => {
-    expect(stepDurationMs(5000, 1000)).toBe(2400);
+    expect(stepDurationMs(5000, 1000)).toBe(8500);
   });
 });
 
@@ -248,6 +252,28 @@ describe('startSmoothScroll', () => {
     const before = scrollY;
     runFrames();
     expect(scrollY).toBe(before);
+  });
+
+  it('длинный межсценовый шаг замедляется в середине и доезжает до остановки', () => {
+    stop();
+    stop = startSmoothScroll({ getStops: () => [0, 1500] });
+    const sampleAt = (fraction: number): number => {
+      now = 1000 + 8500 * fraction;
+      frames.shift()?.(now);
+      return scrollY;
+    };
+    wheel(100);
+    now += 16;
+    frames.shift()?.(now);
+
+    const wingStep = Math.abs(sampleAt(0.3) - sampleAt(0.2));
+    const centerStep = Math.abs(sampleAt(0.55) - sampleAt(0.45));
+
+    expect(centerStep).toBeGreaterThan(0);
+    expect(centerStep).toBeLessThan(wingStep);
+
+    runFrames();
+    expect(scrollY).toBe(1500);
   });
 
   it('после dispose колесо не перехватывается, анимация остановлена', () => {

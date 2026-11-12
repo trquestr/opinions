@@ -1,30 +1,52 @@
 import type { NightDetail } from '../../model/night-details';
-import type { Point3, Projected, Projector } from './projection';
 import type { NightFrame } from './timeline';
 
 /*
  * Гравюрные детали ночной сцены: расчёт положения и прозрачности. Чистые функции — DOM пишет details-layer.ts.
  *
- * Деталь стоит на бесконечно далёкой сфере: направление по рысканию ψ и тангажу θ (взгляд вперёд — +z):
- *   d = (sin ψ·cos θ, sin θ, cos ψ·cos θ),  экран — projectSky(d);
- *   угловая ширина w даёт widthPx = f·tg(w), f — фокус в px;
- *   верхний левый угол = (sx − widthPx/2, sy − widthPx/aspect/2). За спиной камеры (k = 0) деталь скрыта.
+ * Каждая деталь привязана к своему углу экрана (top-left или bottom-right) и проявляется вместе с фразой своей
+ * фигуры. Пока камера едет к фигуре, деталь въезжает в свой угол вместе с небом — по направлению движения камеры:
+ *   сдвиг (dx, dy) = −f · (Δψ_неба, Δθ_неба),
+ * где Δ — отставание углов неба от цели хода (Camera.skyLag), f — фокус в px. Это тот же сдвиг, что у фоновых
+ * звёзд при малых углах (projectSky: x ≈ C − f·ψ), поэтому деталь едет вместе со звёздами и встаёт, когда камера пришла.
+ * Проявление: opacity = фраза · fade, fade = smoothstep((p − 0.25) / 0.75) по доле хода камеры p — медленнее фразы.
  */
 
-/**
- * Потолок прозрачности. Деталь — далёкий фон на небе: она видна только сквозь точечный растр (~35% площади),
- * так что и при таком потолке её средняя яркость в разы ниже туши. Итог с множителем детали не больше 1.
- * Деталь не гаснет при смене фигур: в кадр её вводит и выводит поворот неба (camera.ts, figureSkyTurn).
- */
-export const DETAIL_ALPHA = 0.7;
-/**
- * Потолок сплошной части маски. Целая гравюра — тоновая плашка, чужая рядом с точечной тушью, поэтому деталь
- * остаётся россыпью точек; слабая сплошная подложка лишь связывает точки в читаемый силуэт.
- */
-export const SOLID_MAX = 0.12;
-const DEG = Math.PI / 180;
-/** Защита от деления на ноль, пока картинка не загружена. */
 const MIN_ASPECT = 1e-6;
+/** Экран, под который заданы ширины и смещения деталей (px); на других ширинах они масштабируются. */
+const BASE_WIDTH = 1440;
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 1.2;
+/** Потолок прозрачности гравюрных деталей: тусклый далёкий фон, не спорящий с созвездием и текстом. */
+export const MAX_DETAIL_OPACITY = 0.4;
+
+/** Движение деталей в кадре: проявление/угасание по ходу камеры и сдвиг вместе с небом. Меняется на месте, без аллокаций. */
+export interface DetailMotion {
+  /** Множитель прозрачности входящей фигуры 0…1. */
+  fade: number;
+  /** Сдвиг входящей фигуры от угла, px. */
+  shiftX: number;
+  shiftY: number;
+  /** Номер уходящей фигуры на время перелёта камеры (1…4) или null. */
+  leavingFigure: number | null;
+  /** Прозрачность уходящей фигуры 0…1. */
+  leavingFade: number;
+  /** Сдвиг уходящей фигуры от своего угла, px. */
+  leavingShiftX: number;
+  leavingShiftY: number;
+}
+
+export function createDetailMotion(): DetailMotion {
+  return {
+    fade: 1,
+    shiftX: 0,
+    shiftY: 0,
+    leavingFigure: null,
+    leavingFade: 0,
+    leavingShiftX: 0,
+    leavingShiftY: 0,
+  };
+}
 
 /** Рабочее место одной детали: вход (aspect) и результат расчёта. Меняется на месте — без аллокаций в rAF. */
 export interface DetailSlot {
@@ -34,59 +56,57 @@ export interface DetailSlot {
   x: number;
   y: number;
   widthPx: number;
-  /** false — деталь не видна (за камерой или картинка не загружена). */
+  /** false — деталь не видна (картинка не загружена). */
   isVisible: boolean;
-  readonly projected: Projected;
-  readonly direction: { x: number; y: number; z: number };
 }
 
 export function createDetailSlot(): DetailSlot {
-  return {
-    aspect: 0,
-    x: 0,
-    y: 0,
-    widthPx: 0,
-    isVisible: false,
-    projected: { x: 0, y: 0, k: 0 },
-    direction: { x: 0, y: 0, z: 1 },
-  };
+  return { aspect: 0, x: 0, y: 0, widthPx: 0, isVisible: false };
 }
 
-/** Направление детали по углам; пишет в out. */
-export function detailDirection(detail: NightDetail, out: { x: number; y: number; z: number }): Point3 {
-  const yaw = detail.yawDeg * DEG;
-  const pitch = detail.pitchDeg * DEG;
-  out.x = Math.sin(yaw) * Math.cos(pitch);
-  out.y = Math.sin(pitch);
-  out.z = Math.cos(yaw) * Math.cos(pitch);
-  return out;
+interface View {
+  readonly width: number;
+  readonly height: number;
 }
 
-/** Деталь → экран: центр по направлению на сфере, ширина по угловой ширине, угол — по пропорциям картинки. */
-export function placeDetail(projector: Projector, detail: NightDetail, slot: DetailSlot): void {
-  const { projected } = slot;
-  projector.projectSky(detailDirection(detail, slot.direction), projected);
-  slot.isVisible = slot.aspect > 0 && projected.k > 0;
-  slot.widthPx = projector.focal * Math.tan(detail.widthDeg * DEG);
-  slot.x = projected.x - slot.widthPx / 2;
-  slot.y = projected.y - slot.widthPx / Math.max(slot.aspect, MIN_ASPECT) / 2;
+/** Деталь → экран: угол экрана + смещение, масштаб по ширине вьюпорта. Сдвиг движения камеры — shiftDetail. */
+export function placeDetail(view: View, detail: NightDetail, slot: DetailSlot): void {
+  slot.isVisible = slot.aspect > 0;
+  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.width / BASE_WIDTH));
+  const widthPx = Math.round(detail.widthPx * scale);
+  const heightPx = Math.round(widthPx / Math.max(slot.aspect, MIN_ASPECT));
+  slot.widthPx = widthPx;
+  const [ox, oy] = detail.offset ?? [0, 0];
+  const isTopLeft = detail.corner === 'top-left';
+  slot.x = Math.round((isTopLeft ? 0 : view.width - widthPx) + ox * scale);
+  slot.y = Math.round((isTopLeft ? 0 : view.height - heightPx) + oy * scale);
 }
 
-/** Видимость деталей v ∈ [0, 1]: проступают в Н1 и остаются. Ведёт и прозрачность, и подложку маски (--solid). */
-export function detailVisibility(frame: NightFrame): number {
-  return frame.sky;
+/** Сдвигает уже разложенную деталь вместе с небом (входящую — к углу, уходящую — от угла). */
+export function shiftDetail(slot: DetailSlot, detail: NightDetail, motion: DetailMotion): void {
+  const isLeaving = motion.leavingFigure === detail.figure;
+  slot.x += Math.round(isLeaving ? motion.leavingShiftX : motion.shiftX);
+  slot.y += Math.round(isLeaving ? motion.leavingShiftY : motion.shiftY);
 }
 
-/** Прозрачность детали: видимость × потолок × собственная яркость детали (alpha, по умолчанию 1). */
-export function detailOpacity(frame: NightFrame, detail: NightDetail): number {
-  return Math.min(1, detailVisibility(frame) * DETAIL_ALPHA * (detail.alpha ?? 1));
+/** Прозрачность детали: уходящая фигура гаснет по leavingFade, входящая — фраза × fade, в пределах detail.alpha или MAX_DETAIL_OPACITY. */
+export function detailOpacity(frame: NightFrame, detail: NightDetail, motion: DetailMotion): number {
+  const raw =
+    motion.leavingFigure === detail.figure
+      ? motion.leavingFade
+      : (frame.phrases[detail.figure] ?? 0) * motion.fade;
+  const maxAlpha = detail.alpha ?? MAX_DETAIL_OPACITY;
+  return Math.min(1, Math.max(0, raw)) * maxAlpha;
 }
 
-/**
- * Сплошная часть маски (--solid) по видимости v: SOLID_MAX · clamp(2v − 1, 0, 1). Появление в два этапа:
- * v от 0 до 0.5 — проступают одни точки (слой-плитка stipple.png) вместе с прозрачностью,
- * v от 0.5 до 1 — под точками набирается слабая подложка силуэта. Случайная россыпь не даёт заметной сетки.
- */
-export function solidValue(visibility: number): number {
-  return SOLID_MAX * Math.min(1, Math.max(0, 2 * visibility - 1));
+/** smoothstep((p − 0.25) / 0.75): деталь начинает проступать на четверти хода камеры и набирается к его концу. */
+export function detailFade(progress: number): number {
+  const t = Math.min(1, Math.max(0, (progress - 0.25) / 0.75));
+  return t * t * (3 - 2 * t);
+}
+
+/** 1 − smoothstep(p / 0.75): уходящая деталь плавно гаснет за первые три четверти хода камеры. */
+export function detailOutFade(progress: number): number {
+  const t = Math.min(1, Math.max(0, progress / 0.75));
+  return 1 - t * t * (3 - 2 * t);
 }

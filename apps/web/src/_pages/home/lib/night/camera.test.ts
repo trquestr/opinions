@@ -11,7 +11,7 @@ import {
   overviewShot,
 } from './camera';
 import manifest from './night-manifest.json';
-import { Projector } from './projection';
+import { Projector, SKY_FOLLOW } from './projection';
 import type { Shot } from './camera';
 
 const VIEW = { width: 1440, height: 900 };
@@ -249,6 +249,23 @@ describe('Camera', () => {
     expect(camera.progress(T0 + CAMERA_MS * 3)).toBe(1);
   });
 
+  it('skyLag: в начале хода небо отстаёт на всю разницу углов, к концу хода отставание исчезает', () => {
+    const camera = cameraAt();
+    const target: Shot = { ...TARGET, pose: { ...TARGET.pose, skyYaw: 0.1, skyPitch: -0.05 } };
+    camera.aim(target, T0);
+    const lag = { yaw: 0, pitch: 0 };
+
+    camera.update(T0);
+    camera.skyLag(lag);
+    expect(lag.yaw).toBeCloseTo(-(0.4 * SKY_FOLLOW + 0.1));
+    expect(lag.pitch).toBeCloseTo(-(0.2 * SKY_FOLLOW - 0.05));
+
+    camera.update(T0 + CAMERA_MS);
+    camera.skyLag(lag);
+    expect(lag.yaw).toBeCloseTo(0);
+    expect(lag.pitch).toBeCloseTo(0);
+  });
+
   it('в начале хода ракурс прежний, update сообщает о движении', () => {
     const camera = cameraAt();
     camera.aim(TARGET, T0);
@@ -484,5 +501,26 @@ describe('figureSkyTurn', () => {
     expect(figure.pose.skyPitch).toBeCloseTo(8 * DEGREE);
     expect(overview.pose.skyYaw).toBe(0);
     expect(overview.pose.skyPitch).toBe(0);
+  });
+});
+
+describe('Camera: skyDrift', () => {
+  it('на старте перехода равен нулю, а по мере хода равен сдвигу неба от исходной позы', () => {
+    const camera = cameraAt();
+    camera.aim(TARGET, T0);
+
+    const drift = { yaw: 0, pitch: 0 };
+    camera.update(T0);
+    camera.skyDrift(drift);
+    expect(drift.yaw).toBeCloseTo(0, 8);
+    expect(drift.pitch).toBeCloseTo(0, 8);
+
+    camera.update(T0 + 5000);
+    camera.skyDrift(drift);
+    const expectedYaw = (TARGET.pose.yaw - START.pose.yaw) * 0.33 + (TARGET.pose.skyYaw - START.pose.skyYaw);
+    const expectedPitch =
+      (TARGET.pose.pitch - START.pose.pitch) * 0.33 + (TARGET.pose.skyPitch - START.pose.skyPitch);
+    expect(drift.yaw).toBeCloseTo(expectedYaw, 6);
+    expect(drift.pitch).toBeCloseTo(expectedPitch, 6);
   });
 });

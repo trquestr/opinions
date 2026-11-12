@@ -182,15 +182,8 @@ body {
 }
 
 /*
- * Гравюрные детали ночи — фон за фигурами (lib/night/details-layer.ts): светлые штрихи на чёрном, mix-blend-mode: screen убирает фон.
- * Положение, ширину, opacity и --solid пишет скрипт. Гравюра видна россыпью точек, как тушь фигур, — маска из двух
- * слоёв, сложенных (add):
- *   A — сплошная заливка с альфой --solid = 0.12 · clamp(2v − 1, 0, 1), v — видимость детали;
- *   B — плитка stipple.png 128×128 px: случайные точки (~35% площади), бесшовная.
- * Итоговая альфа маски = A + B(1 − A): при v < 0.5 видны одни точки плитки (они приходят вместе с opacity),
- * при v от 0.5 до 1 под ними набирается слабая подложка, связывающая точки в силуэт. Целой гравюра не становится:
- * тоновая плашка рядом с точечной тушью выглядит наклейкой. Случайная россыпь вместо правильной сетки не даёт
- * заметного узора. Плитку готовит scripts/prepare_night_details.py.
+ * Гравюрные детали ночи — фон за фигурами (lib/night/details-layer.ts): светлые штрихи на чёрном,
+ * mix-blend-mode: screen убирает чёрный фон. Появляются и исчезают синхронно с фразой своей фигуры (opacity 0…1).
  */
 .night-detail {
   position: absolute;
@@ -204,22 +197,7 @@ body {
   visibility: hidden;
   transform-origin: 0 0;
   will-change: transform, opacity;
-  -webkit-mask-image:
-    linear-gradient(rgb(0 0 0 / var(--solid, 0)), rgb(0 0 0 / var(--solid, 0))),
-    url('/assets/night/details/stipple.png');
-  mask-image:
-    linear-gradient(rgb(0 0 0 / var(--solid, 0)), rgb(0 0 0 / var(--solid, 0))),
-    url('/assets/night/details/stipple.png');
-  -webkit-mask-size:
-    100% 100%,
-    128px 128px;
-  mask-size:
-    100% 100%,
-    128px 128px;
-  -webkit-mask-repeat: no-repeat, repeat;
-  mask-repeat: no-repeat, repeat;
-  -webkit-mask-composite: source-over;
-  mask-composite: add;
+  pointer-events: none;
 }
 
 /* Дневной лист сцены «Облака»: ночным его делает вуаль сумерек (lib/clouds/dusk-veil.ts), а не смена фона. */
