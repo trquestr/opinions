@@ -150,3 +150,21 @@ describe('Cursor: активность после волны', () => {
     expect(cursor.isActive()).toBe(false);
   });
 });
+
+describe('Cursor: крайние случаи волны', () => {
+  it('волна, начавшаяся в будущем, ещё не действует', () => {
+    const cursor = new Cursor();
+    cursor.click(0, 0, 500);
+    cursor.tick(0);
+
+    expect(influenceAt(cursor, 100, 0)).toEqual({ shiftX: 0, shiftY: 0, grow: 1 });
+  });
+
+  it('в самом центре волны капля не сдвигается', () => {
+    const cursor = new Cursor();
+    cursor.click(0, 0, 0);
+    cursor.tick(100);
+
+    expect(influenceAt(cursor, 0, 0).shiftX).toBe(0);
+  });
+});

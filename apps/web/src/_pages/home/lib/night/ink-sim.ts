@@ -3,7 +3,9 @@ import { MAX_DROP_RADIUS_PX } from './ink-grid';
 import { createRandom } from './stars';
 import type { Cursor, Influence } from './cursor';
 import type { InkGrid } from './ink-grid';
-import type { Bounds, Layout, Point } from './layout';
+import { depthAt } from './projection';
+import type { Bounds, Point } from './layout';
+import type { Projected, Projector } from './projection';
 
 /*
  * Движение капель туши ночной сцены. Считается на процессоре (как у бюста): шейдеру туши нужны готовые центры,
@@ -14,17 +16,17 @@ import type { Bounds, Layout, Point } from './layout';
  * как бы быстро ни крутили колесо. Если цель сменилась посреди перехода, капли поворачивают к новой цели
  * с того места, где они сейчас (снимок положений), — без рывка.
  *
- * Путь капли i за переход, τ = (t − t₀)/T ∈ [0, 1]:
- *   уход:    λ = smoothstep(0, 1, (τ − 0.26·k_A − 0.06·h₁) / 0.32) — капли отрываются волной слева направо
- *            (k_A — положение капли в старой фигуре по x, 0…1);
- *   приход:  α = smoothstep(0, 1, (τ − 0.34 − 0.26·k_B − 0.06·h₂) / 0.32) — оседают так же, волной слева направо;
- *   место:   P = mix(mix(A, V(t), λ), B, α), радиус r = mix(mix(r_A, r_V, λ), r_B, α).
- * V(t) — галактика с двумя спиральными рукавами вокруг центра ковша C: кольцо радиуса ρᵢ = R_V·(0.25 + 0.75·√lᵢ),
- *   угол θ = θ₀ᵢ + ωᵢ·t, ωᵢ = 0.9 / (0.35 + lᵢ) рад/с — внутренние кольца быстрее внешних (закрутка, как у
- *   Кеплера), диск сплющен по вертикали в 0.32 раза — видим его под углом;
- *   V = C + (ρ·cos θ, 0.32·ρ·sin θ + 6·(h₁ − 0.5)); в галактике капля — пыль: r_V = (0.10 + 0.12·h₂) · глубина,
- *   глубина = 0.8 + 0.4·(0.5 + 0.5·sin θ) — ближняя сторона диска крупнее.
- * «Подплывание» к линиям зрителя идёт напрямую, без галактики (λ = 0, приход волной на всём отрезке).
+ * ПЕРЕЛЁТ РОЕМ (решено владельцем 2026-11-12 вместо «галактики»-бублика). Путь капли i, τ = (t − t₀)/T:
+ *   волна:   e = smoothstep((τ − 0.3·k_A − 0.12·h₁) / 0.58) — капли срываются волной слева направо
+ *            (k_A — положение капли в старой фигуре по x, 0…1), каждая летит 0.58 перехода;
+ *   кривая:  квадратичная Безье P = (1 − e)²·A + 2(1 − e)e·M + e²·B, M — личная промежуточная точка:
+ *            M = (A + B)/2 + (s·SWEEP·(0.5 + h₂), 50·(h₃ − 0.5), 120·(h₁ − 0.5)) — общий снос s = ±1 в сторону,
+ *            где встанет новая фигура (рой течёт с одной стороны на другую), плюс личный разброс по высоте и
+ *            по глубине (часть роя летит к камере, часть от неё — объём);
+ *   хаос:    поверх — турбулентность с горбом b = sin(πe): δ = b·(7·(sin(1.7t + 2πh₁) + 0.6·sin(3.9t + 2πh₂)),
+ *            7·(cos(1.9t + 2πh₂) + 0.6·cos(3.3t + 2πh₃)), 10·sin(1.3t + 2πh₃)) — капли петляют, а не летят по линейке;
+ *   капля:   r = mix(r_A, r_B, e)·(1 − 0.3·b) — в полёте чуть мельче; вытягивается по скорости (updateStretch).
+ * «Подплывание» к линиям зрителя — напрямую, без сноса и почти без хаоса (M = (A + B)/2, турбулентность ×0.2).
  */
 
 const TAU = Math.PI * 2;
@@ -33,9 +35,28 @@ const SEED = 11;
 const TRANSITION_MS = 3200;
 const DIRECT_TRANSITION_MS = 1800;
 const REDUCED_TRANSITION_MS = 900;
-/** Радиус галактики в долях ширины общих границ фигур. */
-const VORTEX_RADIUS_SHARE = 0.42;
-const VORTEX_FLATTEN = 0.32;
+/** Общий снос роя вбок (единицы ковша), разброс промежуточных точек по высоте и глубине, амплитуды турбулентности. */
+const SWEEP = 70;
+const SCATTER_Y = 50;
+const SCATTER_Z = 120;
+const TURBULENCE_XY = 7;
+const TURBULENCE_Z = 10;
+const DIRECT_TURBULENCE = 0.2;
+/** Толщина «листа» фигуры, единицы: разброс капель по глубине для объёма (мягкий, без разрыва контуров). */
+const DEPTH_JITTER = 2;
+/**
+ * Рельеф фигуры (владелец 2026-11-12: «объект должен немного 3d-шиться»): густая тёмная тушь гравюры (крупная капля)
+ * выступает к зрителю на RELIEF·r/r_max единиц, светлые места остаются глубже — как барельеф. Умеренная амплитуда
+ * сохраняет объём при движении курсора, не искажая силуэт и колёса при ракурсе 20°.
+ */
+const RELIEF = 8;
+/**
+ * Дымка — состояние 0 (timeline.HAZE): капли висят облаком на глубине ±HAZE_DEPTH вокруг листа ковша
+ * (владелец 2026-11-12: «больше глубины и в Н1, и в финале»). При покачивании камеры и движении мыши ближние капли
+ * проплывают быстрее дальних — облако читается объёмным.
+ */
+const HAZE_STATE = 0;
+const HAZE_DEPTH = 80;
 /** Просвет туши вокруг семи звёзд ковша: внутри CLEAR_INNER капли нет, к CLEAR_OUTER она полная (единицы). */
 const CLEAR_INNER = 1.4;
 const CLEAR_OUTER = 3.2;
@@ -57,7 +78,9 @@ const MIN_VISIBLE_PX = 0.45;
 export interface InkStep {
   /** Состояние, к которому идёт тушь (дымка, фигура, пунктир зрителя). */
   readonly target: number;
-  /** Идти к цели напрямую, без галактики («подплывание» к линиям зрителя). */
+  /** Куда сносит рой при перелёте: +1 — вправо, −1 — влево (в сторону, где встанет новая фигура). */
+  readonly sweep: number;
+  /** Идти к цели напрямую, без сноса и почти без хаоса («подплывание» к линиям зрителя). */
   readonly isDirect: boolean;
   /** Амплитуда дрейфа в покое у цели, единицы: у дымки большая, у фигуры малая. */
   readonly drift: number;
@@ -71,11 +94,11 @@ export interface InkStep {
 }
 
 export interface InkSimulationOptions {
-  /** Центр галактики — центр ковша. */
+  /** Центр ковша. */
   readonly center: Point;
   /** Семь звёзд ковша: вокруг них тушь расступается. */
   readonly dipper: readonly Point[];
-  /** Общие границы фигур: по ним считается волна «слева направо» и радиус галактики. */
+  /** Общие границы фигур: по ним считается волна «слева направо». */
   readonly bounds: Bounds;
   /** Множитель радиуса капель на экране (см. scene.ts). */
   readonly radiusScale: number;
@@ -84,6 +107,7 @@ export interface InkSimulationOptions {
 interface Placement {
   x: number;
   y: number;
+  z: number;
   r: number;
 }
 
@@ -124,11 +148,17 @@ export class InkSimulation {
   private readonly offY: Float32Array;
   /** Скретчи: капля для сетки (r, stretch, dirX, dirY), её место, цель, влияние курсора. */
   private readonly drop = new Float32Array(4);
-  private readonly place: Placement = { x: 0, y: 0, r: 0 };
-  private readonly goal: Placement = { x: 0, y: 0, r: 0 };
+  private readonly place: Placement = { x: 0, y: 0, z: 0, r: 0 };
+  private readonly goal: Placement = { x: 0, y: 0, z: 0, r: 0 };
+  private readonly screen: Projected = { x: 0, y: 0, k: 0 };
+  /** Глубина капель каждого состояния (считается раз при загрузке состояния). */
+  private readonly depths: (Float32Array | undefined)[] = [];
+  /** Сдвиг капель по x от смещения вдоль линии взгляда (см. setState). */
+  private readonly shifts: (Float32Array | undefined)[] = [];
+  private readonly fromZ: Float32Array;
+  private readonly curZ: Float32Array;
   private readonly influence: Influence = { shiftX: 0, shiftY: 0, grow: 1 };
   private readonly options: InkSimulationOptions;
-  private readonly vortexRadius: number;
   private target = -1;
   private isDirect = false;
   private startMs = 0;
@@ -137,12 +167,15 @@ export class InkSimulation {
   private hasPrevious = false;
   /** Положение текущей капли до сноса курсором, px (поля, а не объект — без аллокаций на каплю). */
   private baseX = 0;
+  /** Полёт текущей капли: доля пути, снос роя, время (с). */
+  private flightE = 0;
+  private flightSweep = 1;
+  private flightT = 0;
   private baseY = 0;
 
   constructor(count: number, options: InkSimulationOptions) {
     this.count = count;
     this.options = options;
-    this.vortexRadius = (options.bounds.maxX - options.bounds.minX) * VORTEX_RADIUS_SHARE;
     const random = createRandom(SEED);
     this.seedA = Float32Array.from({ length: count }, () => random());
     this.seedB = Float32Array.from({ length: count }, () => random());
@@ -153,6 +186,8 @@ export class InkSimulation {
     this.curX = new Float32Array(count);
     this.curY = new Float32Array(count);
     this.curR = new Float32Array(count);
+    this.fromZ = new Float32Array(count);
+    this.curZ = new Float32Array(count);
     this.prevX = new Float32Array(count);
     this.prevY = new Float32Array(count);
     this.stretch = new Float32Array(count);
@@ -162,8 +197,34 @@ export class InkSimulation {
     this.dirY = new Float32Array(count);
   }
 
-  setState(index: number, data: Int16Array): void {
+  /**
+   * Состояние туши и его глубина. Капля лежит на листе, натянутом точно на семь звёзд (depthAt): в своём ракурсе
+   * звёзды стоят ровно на своих местах фигуры. Объём сверх листа — смещение d вдоль линии взгляда ракурса фигуры
+   * v = (sin ψ, 0, cos ψ), ψ — рыскание её кадра (heroYaw): поворот камеры x₁ = x·cos ψ − z·sin ψ даёт для v
+   * Δx₁ = d·(sin ψ·cos ψ − cos ψ·sin ψ) = 0 — в своём ракурсе фигура чёткая, как запечённая гравюра, а объём
+   * проявляется только при движении (курсор, покачивание, смена фигур). (Владелец 2026-11-12: смещение по одной z
+   * под углом 20° смазывало детали и уводило звёзды с фигур.)
+   *   фигура: d = −RELIEF·r/r_max + DEPTH_JITTER·(h₃ − 0.5) — барельеф по густоте туши и разброс;
+   *   дымка (Н1, Н6–Н9): d = HAZE_DEPTH·(2h₁ − 1) — облако в объёме вокруг ковша.
+   */
+  setState(index: number, data: Int16Array, heroYaw = 0): void {
     this.states[index] = data;
+    let maxRadius = 1;
+    for (let at = 2; at < data.length; at += INK_STRIDE) maxRadius = Math.max(maxRadius, data[at] ?? 0);
+    const volume = Float32Array.from({ length: this.count }, (_, i) => this.volumeOf({ index, data, i, maxRadius }));
+    this.depths[index] = Float32Array.from(volume, (d, i) => {
+      const at = i * INK_STRIDE;
+      return depthAt((data[at] ?? 0) / FIXED_POINT, (data[at + 1] ?? 0) / FIXED_POINT) + d * Math.cos(heroYaw);
+    });
+    this.shifts[index] = Float32Array.from(volume, (d) => d * Math.sin(heroYaw));
+  }
+
+  /** Смещение капли сверх листа вдоль линии взгляда (см. setState). */
+  private volumeOf(drop: { readonly index: number; readonly data: Int16Array; readonly i: number; readonly maxRadius: number }): number {
+    const { index, data, i } = drop;
+    if (index === HAZE_STATE) return ((this.seedA[i] ?? 0.5) * 2 - 1) * HAZE_DEPTH;
+    const relief = -RELIEF * ((data[i * INK_STRIDE + 2] ?? 0) / drop.maxRadius);
+    return relief + ((this.seedC[i] ?? 0.5) - 0.5) * DEPTH_JITTER;
   }
 
   hasState(index: number): boolean {
@@ -181,13 +242,15 @@ export class InkSimulation {
   }
 
   /** Считает все капли кадра и раскладывает их по сетке. */
-  step(input: InkStep, layout: Layout, grid: InkGrid): void {
+  step(input: InkStep, projector: Projector, grid: InkGrid): void {
     grid.begin();
     const goal = this.states[input.target] ?? this.states[0];
-    if (goal) {
-      this.retargetIfNeeded(input, goal);
+    const goalDepth = this.depths[input.target] ?? this.depths[0];
+    const goalShift = this.shifts[input.target] ?? this.shifts[0];
+    if (goal && goalDepth) {
+      this.retargetIfNeeded(input, goal, goalDepth);
       const tau = Math.min(1, (input.nowMs - this.startMs) / this.duration(input.isReducedMotion));
-      const frame: DropFrame = { input, goal, layout, grid, tau };
+      const frame: DropFrame = { input, goal, goalDepth, goalShift, projector, grid, tau };
       for (let i = 0; i < this.count; i++) this.stepDrop(i, frame);
       this.hasCurrent = true;
       this.hasPrevious = true;
@@ -204,7 +267,7 @@ export class InkSimulation {
    * Новая цель (или цель только что загрузилась вместо дымки) — снимок текущих положений становится началом перехода.
    * Самый первый кадр начинается сразу в цели, без перехода.
    */
-  private retargetIfNeeded(input: InkStep, goal: Int16Array): void {
+  private retargetIfNeeded(input: InkStep, goal: Int16Array, goalDepth: Float32Array): void {
     const effective = this.states[input.target] ? input.target : 0;
     if (effective === this.target) return;
     this.target = effective;
@@ -215,8 +278,10 @@ export class InkSimulation {
       this.fromX.set(this.curX);
       this.fromY.set(this.curY);
       this.fromR.set(this.curR);
+      this.fromZ.set(this.curZ);
       return;
     }
+    this.fromZ.set(goalDepth);
     for (let i = 0; i < this.count; i++) {
       readInto(goal, i, this.goal);
       this.fromX[i] = this.goal.x;
@@ -226,23 +291,27 @@ export class InkSimulation {
   }
 
   private stepDrop(i: number, frame: DropFrame): void {
-    const { layout, grid, input } = frame;
+    const { projector, grid, input } = frame;
     const p = this.place;
-    readInto(frame.goal, i, this.goal);
+    this.readGoal(i, frame);
     if (input.isReducedMotion) this.placeStill(i, frame.tau);
     else this.placeMoving(i, frame);
     this.curX[i] = p.x;
     this.curY[i] = p.y;
     this.curR[i] = p.r;
+    this.curZ[i] = p.z;
     this.applyDrift(i, frame);
     this.applyHover(input, this.seedB[i] ?? 0);
     const clear = smoothstep((this.nearestStar(p.x, p.y) - CLEAR_INNER) / (CLEAR_OUTER - CLEAR_INNER));
-    this.baseX = layout.originX + p.x * layout.scale;
-    this.baseY = layout.originY + p.y * layout.scale;
+    const screen = projector.project(p, this.screen);
+    this.baseX = screen.x;
+    this.baseY = screen.y;
     const pull = this.applyCursor(i, input.cursor);
     const x = this.baseX + (this.offX[i] ?? 0);
     const y = this.baseY + (this.offY[i] ?? 0);
-    const radius = Math.min(p.r * clear * layout.scale * this.options.radiusScale * pull, MAX_DROP_RADIUS_PX);
+    const refK = projector.referenceK;
+    const kScale = refK > 0 ? Math.sqrt(screen.k * refK) : screen.k;
+    const radius = Math.min(p.r * clear * kScale * this.options.radiusScale * pull, MAX_DROP_RADIUS_PX);
     this.updateStretch(i, x, y);
     if (radius < MIN_VISIBLE_PX) return;
     this.drop[0] = radius;
@@ -252,49 +321,68 @@ export class InkSimulation {
     grid.add(x, y, this.drop);
   }
 
+  /** Цель капли: место из состояния, глубина листа и сдвиг объёма вдоль линии взгляда. */
+  private readGoal(i: number, frame: DropFrame): void {
+    readInto(frame.goal, i, this.goal);
+    this.goal.z = frame.goalDepth[i] ?? 0;
+    this.goal.x += frame.goalShift?.[i] ?? 0;
+  }
+
   /** Доля положения по x в общих границах фигур: 0 — левый край, 1 — правый. */
   private keyOf(x: number): number {
     const { minX, maxX } = this.options.bounds;
     return Math.min(1, Math.max(0, (x - minX) / (maxX - minX)));
   }
 
-  /** Уход в галактику и приход в цель волнами (формулы — в заголовке файла). */
+  /** Перелёт роем по личной кривой с турбулентностью (формулы — в заголовке файла). */
   private placeMoving(i: number, { tau, input }: DropFrame): void {
     const h1 = this.seedA[i] ?? 0;
-    const h2 = this.seedB[i] ?? 0;
-    const fromX = this.fromX[i] ?? 0;
-    const fromY = this.fromY[i] ?? 0;
-    const fromR = this.fromR[i] ?? 0;
     const g = this.goal;
-    const arrive = this.isDirect
-      ? smoothstep((tau - 0.3 * this.keyOf(g.x) - 0.1 * h2) / 0.6)
-      : smoothstep((tau - 0.34 - 0.26 * this.keyOf(g.x) - 0.06 * h2) / 0.32);
-    const leave = this.isDirect ? 0 : smoothstep((tau - 0.26 * this.keyOf(fromX) - 0.06 * h1) / 0.32);
-    const p = this.place;
-    this.vortexAt(i, input.nowMs / 1000, fromR > 0 || g.r > 0);
-    const midX = fromX + (p.x - fromX) * leave;
-    const midY = fromY + (p.y - fromY) * leave;
-    const midR = fromR + (p.r - fromR) * leave;
-    p.x = midX + (g.x - midX) * arrive;
-    p.y = midY + (g.y - midY) * arrive;
-    p.r = midR + (g.r - midR) * arrive;
+    const fromX = this.fromX[i] ?? 0;
+    const e = this.isDirect
+      ? smoothstep((tau - 0.3 * this.keyOf(g.x) - 0.1 * (this.seedB[i] ?? 0)) / 0.6)
+      : smoothstep((tau - 0.3 * this.keyOf(fromX) - 0.12 * h1) / 0.58);
+    // Параметры полёта — в полях, а не в объекте: placeMoving вызывается для каждой капли каждый кадр
+    this.flightE = e;
+    this.flightSweep = input.sweep;
+    this.flightT = input.nowMs / 1000;
+    this.placeOnCurve(i);
+    this.applyTurbulence(i);
   }
 
-  /** Место капли в галактике в момент t (с): пишет в place. Невидимая в обеих фигурах капля и тут невидима. */
-  private vortexAt(i: number, t: number, isVisible: boolean): void {
-    const h1 = this.seedA[i] ?? 0;
-    const h2 = this.seedB[i] ?? 0;
-    const layer = this.seedC[i] ?? 0;
-    const rho = this.vortexRadius * (0.25 + 0.75 * Math.sqrt(layer));
-    // Два спиральных рукава: θ₀ = π·(рукав) + 0.5·(h₁ − 0.5)·π/2 + 2.2·ln(ρ/ρ_min); дифференциальное вращение их докручивает
-    const arm = h2 < 0.5 ? 0 : Math.PI;
-    const theta0 = arm + (h1 - 0.5) * 0.8 + 2.2 * Math.log(rho / (this.vortexRadius * 0.25));
-    const theta = theta0 + (0.9 / (0.35 + layer)) * t;
-    const depth = 0.8 + 0.4 * (0.5 + 0.5 * Math.sin(theta));
+  /** Квадратичная Безье от снимка к цели через личную промежуточную точку M. */
+  private placeOnCurve(i: number): void {
+    const e = this.flightE;
     const p = this.place;
-    p.x = this.options.center.x + Math.cos(theta) * rho;
-    p.y = this.options.center.y + Math.sin(theta) * rho * VORTEX_FLATTEN + 6 * (h1 - 0.5);
-    p.r = isVisible ? (0.1 + 0.12 * h2) * depth : 0;
+    const g = this.goal;
+    const ax = this.fromX[i] ?? 0;
+    const ay = this.fromY[i] ?? 0;
+    const az = this.fromZ[i] ?? 0;
+    const scatter = this.isDirect ? 0 : 1;
+    const mx = (ax + g.x) / 2 + scatter * this.flightSweep * SWEEP * (0.5 + (this.seedB[i] ?? 0));
+    const my = (ay + g.y) / 2 + scatter * SCATTER_Y * ((this.seedC[i] ?? 0) - 0.5);
+    const mz = (az + g.z) / 2 + scatter * SCATTER_Z * ((this.seedA[i] ?? 0) - 0.5);
+    const a = (1 - e) * (1 - e);
+    const b = 2 * (1 - e) * e;
+    const c = e * e;
+    p.x = a * ax + b * mx + c * g.x;
+    p.y = a * ay + b * my + c * g.y;
+    p.z = a * az + b * mz + c * g.z;
+    p.r = ((this.fromR[i] ?? 0) * (1 - e) + g.r * e) * (1 - 0.3 * Math.sin(Math.PI * e));
+  }
+
+  /** Турбулентность с горбом sin(πe): в начале и в конце пути капля точно на месте, посередине — петляет. */
+  private applyTurbulence(i: number): void {
+    const bump = Math.sin(Math.PI * this.flightE) * (this.isDirect ? DIRECT_TURBULENCE : 1);
+    if (bump <= 0) return;
+    const t = this.flightT;
+    const p1 = TAU * (this.seedA[i] ?? 0);
+    const p2 = TAU * (this.seedB[i] ?? 0);
+    const p3 = TAU * (this.seedC[i] ?? 0);
+    const p = this.place;
+    p.x += bump * TURBULENCE_XY * (Math.sin(1.7 * t + p1) + 0.6 * Math.sin(3.9 * t + p2));
+    p.y += bump * TURBULENCE_XY * (Math.cos(1.9 * t + p2) + 0.6 * Math.cos(3.3 * t + p3));
+    p.z += bump * TURBULENCE_Z * Math.sin(1.3 * t + p3);
   }
 
   /** Без анимации: капля гаснет на старом месте и проступает на новом, без полёта. */
@@ -304,6 +392,7 @@ export class InkSimulation {
     const isLeaving = tau < 0.5;
     p.x = isLeaving ? (this.fromX[i] ?? 0) : g.x;
     p.y = isLeaving ? (this.fromY[i] ?? 0) : g.y;
+    p.z = isLeaving ? (this.fromZ[i] ?? 0) : g.z;
     p.r = (isLeaving ? (this.fromR[i] ?? 0) : g.r) * Math.abs(1 - 2 * tau);
   }
 
@@ -381,7 +470,9 @@ export class InkSimulation {
 interface DropFrame {
   readonly input: InkStep;
   readonly goal: Int16Array;
-  readonly layout: Layout;
+  readonly goalDepth: Float32Array;
+  readonly goalShift: Float32Array | undefined;
+  readonly projector: Projector;
   readonly grid: InkGrid;
   readonly tau: number;
 }

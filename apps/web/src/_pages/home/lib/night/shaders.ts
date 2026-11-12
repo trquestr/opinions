@@ -1,7 +1,7 @@
 /*
  * Шейдеры ночной сцены (WebGL2). Три прохода: тушь (капли), линии (контур ковша и линии зрителя), звёзды.
  * Общие соглашения:
- *   - координаты фигур и звёзд — «единицы ковша»; на экран: px = uOrigin + p · uScale (CSS-пиксели);
+ *   - звёзды и линии приходят уже в экранных CSS-px: перспективную проекцию считает projection.ts (одна на всё);
  *   - из CSS-пикселей в клип-пространство: clip = px / uView · 2 − 1, ось y переворачивается (на экране она вниз);
  *   - цвет премультиплицирован (rgb уже умножен на альфу), смешивание ONE, ONE_MINUS_SRC_ALPHA;
  *   - холст прозрачный: ночной фон #0b0b0d даёт CSS сцены, под холстом лежат гравюры.
@@ -122,7 +122,7 @@ void main() {
           float dirLength = length(t1.xy);
           if (dirLength > 0.5) dd = sdDroplet(p, t0.xy, t1.xy / dirLength, t0.z, t0.w);
         }
-        float k = min(1.2, t0.z * 0.2);
+        float k = min(0.65, t0.z * 0.12);
         d = smin(d, dd, max(k, 0.001));
       }
     }
@@ -148,8 +148,6 @@ layout(location = 0) in vec2 aCorner;
 uniform vec4 uSegments[32];
 uniform int uOutlineCount;
 uniform vec2 uAlpha;
-uniform vec2 uOrigin;
-uniform float uScale;
 uniform vec2 uView;
 uniform float uWidth;
 out float vAcross;
@@ -157,8 +155,8 @@ out float vAlpha;
 
 void main() {
   vec4 seg = uSegments[gl_InstanceID];
-  vec2 a = uOrigin + seg.xy * uScale;
-  vec2 b = uOrigin + seg.zw * uScale;
+  vec2 a = seg.xy;
+  vec2 b = seg.zw;
   vec2 dir = b - a;
   vec2 n = vec2(-dir.y, dir.x) / max(length(dir), 1e-3);
   float half_ = uWidth * 0.5 + 1.0;
@@ -187,7 +185,7 @@ void main() {
  * (обе в единицах ковша). Альфа по виду — uAlpha.x / .y / .z (считает таймлайн). Облик семи звёзд — stars.ts.
  * Курсора здесь нет вовсе: звёзды под рукой не двигаются. Сияние меняет только яркость и лучи, не положение.
  *
- * Свечение в координатах q = offset / s (в размерах ядра), φ — личная фаза звезды (хэш её положения), t = uTime:
+ * Свечение в координатах q = offset / s (в размерах ядра), φ — личная фаза звезды (хэш её номера), t = uTime:
  *   мерцание   m = 1 + 0.28·sin(1.3t + φ) + 0.12·sin(3.1t + 1.7φ) — две несоизмеримые частоты, без явного периода;
  *   вспышка    f = max(0, sin(0.45t + 3φ))^30 — короткий всплеск раз в ~14 с, у каждой звезды в своё время;
  *   ядро       C = exp(−1.2·|q|²) · (1 + 0.5·f);
@@ -207,10 +205,7 @@ layout(location = 1) in vec2 aPos;
 layout(location = 2) in vec3 aLook;
 layout(location = 3) in vec2 aTint;
 uniform vec3 uAlpha;
-uniform vec2 uOrigin;
-uniform float uScale;
 uniform vec2 uView;
-uniform vec2 uParallax;
 out vec2 vOffset;
 out float vSize;
 out float vIntensity;
@@ -220,8 +215,8 @@ out vec2 vTint;
 
 void main() {
   float kind = aLook.z;
-  // Фоновые звёзды «дальше» ковша: камера сдвигает их только на uParallax (доля её хода), ковш — целиком
-  vec2 center = kind < 0.5 ? aPos * uView + uParallax : uOrigin + aPos * uScale;
+  // Положение уже спроецировано (star-field.ts): фоновые — с небесной сферы, ковш и тусклые — из мира
+  vec2 center = aPos;
   float alpha = kind < 0.5 ? uAlpha.x : (kind < 1.5 ? uAlpha.y : uAlpha.z);
   vIsDipper = step(0.5, kind) * step(kind, 1.5);
   float extent = aLook.x * mix(4.0, 10.0, vIsDipper);
@@ -231,7 +226,8 @@ void main() {
   vOffset = aCorner * extent;
   vSize = aLook.x;
   vIntensity = aLook.y * alpha;
-  vPhase = fract(sin(dot(aPos, vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+  // Фаза — хэш номера звезды, а не положения: положение теперь экранное и меняется с камерой каждый кадр
+  vPhase = fract(sin(float(gl_InstanceID) * 12.9898 + 4.1) * 43758.5453) * 6.2831853;
   vTint = aTint;
 }`;
 
@@ -244,6 +240,7 @@ in float vPhase;
 in float vIsDipper;
 in vec2 vTint;
 uniform float uTime;
+uniform vec2 uViewAngle;
 out vec4 outColor;
 
 vec2 rotate(vec2 v, float angle) {
@@ -266,10 +263,15 @@ void main() {
   float twinkle = 1.0 + 0.28 * sin(uTime * 1.3 + vPhase) + 0.12 * sin(uTime * 3.1 + vPhase * 1.7);
   float flare = pow(max(0.0, sin(uTime * 0.45 + vPhase * 3.0)), 30.0);
   float core = exp(-1.2 * r2) * (1.0 + 0.5 * flare);
-  float halo = 0.24 * exp(-r2 / 9.0) * (0.8 + 0.2 * sin(uTime * 0.7 + vPhase));
+  // Блик от ракурса (владелец 2026-11-12): при повороте камеры звезда как будто поворачивается гранью —
+  // g = 1 + 0.25·sin(9ψ + φ)·cos(7θ + 2φ), ψ/θ — рыскание и тангаж камеры; у каждой звезды своя фаза φ
+  float facet = 1.0 + 0.25 * sin(uViewAngle.x * 9.0 + vPhase) * cos(uViewAngle.y * 7.0 + vPhase * 2.0);
+  float halo = 0.24 * exp(-r2 / 9.0) * (0.8 + 0.2 * sin(uTime * 0.7 + vPhase)) * facet;
   float rayLength = 3.75 * (0.8 + 0.2 * sin(uTime * 0.9 + vPhase * 2.0)) * (1.0 + 0.3 * flare);
-  float spin = vTint.y + 0.08 * sin(uTime * 0.3 + vPhase);
-  float glare = vIsDipper * rays(rotate(q, spin), rayLength) * (1.0 + 0.6 * flare);
+  // Лучи поворачиваются вслед за ракурсом: β = (1.2 + 0.8·frac(φ))·ψ — у каждой звезды на свой угол
+  float follow = 1.2 + 0.8 * fract(vPhase * 0.159);
+  float spin = vTint.y + 0.08 * sin(uTime * 0.3 + vPhase) + follow * uViewAngle.x;
+  float glare = vIsDipper * rays(rotate(q, spin), rayLength) * (1.0 + 0.6 * flare) * facet;
   float intensity = ((core + glare) * twinkle + halo) * vIntensity;
   float alpha = min(intensity, 1.0);
   vec3 glow = mix(vec3(0.80, 0.86, 1.0), vec3(0.42, 0.60, 1.0), vTint.x);

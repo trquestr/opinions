@@ -1,6 +1,4 @@
-import { unitsToPx } from './layout';
-import { DRAWABLE_STARS } from './stars';
-import type { Layout, Point } from './layout';
+import type { Point } from './layout';
 
 /*
  * Рисование своего созвездия (Н9). Только от звезды к звезде: семь звёзд ковша и тусклые рядом, свободной линии нет.
@@ -47,13 +45,15 @@ interface HitQuery {
   readonly radiusPx: number;
 }
 
-/** Ближайшая звезда в радиусе попадания или null. */
-export function findStarAt(layout: Layout, query: HitQuery): number | null {
+/**
+ * Ближайшая звезда в радиусе попадания или null. stars — экранные положения звёзд для рисования
+ * (после проекции камерой, в порядке DRAWABLE_STARS).
+ */
+export function findStarAt(stars: readonly Point[], query: HitQuery): number | null {
   let best: number | null = null;
   let bestDistance = query.radiusPx;
-  DRAWABLE_STARS.forEach((star, index) => {
-    const px = unitsToPx(layout, star);
-    const distance = Math.hypot(px.x - query.point.x, px.y - query.point.y);
+  stars.forEach((star, index) => {
+    const distance = Math.hypot(star.x - query.point.x, star.y - query.point.y);
     if (distance <= bestDistance) {
       best = index;
       bestDistance = distance;

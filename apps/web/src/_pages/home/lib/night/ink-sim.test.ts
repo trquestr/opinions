@@ -2,10 +2,29 @@ import { describe, expect, it } from 'vitest';
 import { Cursor } from './cursor';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
+import { depthAt, Projector } from './projection';
 import type { InkStep } from './ink-sim';
+import type { Point3, Projected } from './projection';
 
 /** px = origin + p · scale: капля (20, 10) попадает в (300, 150), капля (60, 30) — в (700, 350). */
 const LAYOUT = { originX: 100, originY: 50, scale: 10 };
+
+/** Глубины, с которыми симуляция просила проекцию (для проверки z). */
+const requestedDepths: number[] = [];
+
+/**
+ * Плоская проекция вместо настоящей камеры: px = origin + p · scale, глубина не влияет на положение,
+ * так что ожидаемые числа не зависят от разброса глубин капель. Настоящая проекция проверяется в projection.test.ts.
+ */
+const FLAT_PROJECTOR = {
+  project(point: Point3, out: Projected): Projected {
+    requestedDepths.push(point.z);
+    out.x = LAYOUT.originX + point.x * LAYOUT.scale;
+    out.y = LAYOUT.originY + point.y * LAYOUT.scale;
+    out.k = LAYOUT.scale;
+    return out;
+  },
+} as unknown as Projector;
 const CENTER = { x: 50, y: 25 };
 const BOUNDS = { minX: 0, minY: 0, maxX: 100, maxY: 50 };
 const FAR_STAR = { x: 5000, y: 5000 };
@@ -18,6 +37,7 @@ const HIDDEN = Int16Array.of(2000, 1000, 0);
 const STILL_STEP: InkStep = {
   target: 0,
   isDirect: false,
+  sweep: 1,
   drift: 0,
   isReducedMotion: false,
   nowMs: 0,
@@ -68,7 +88,7 @@ function dropsIn(grid: InkGrid): Dropped[] {
 
 /** Один кадр на общей сетке; возвращает капли кадра. */
 function stepOn(sim: InkSimulation, grid: InkGrid, input: Partial<InkStep>): Dropped[] {
-  sim.step({ ...STILL_STEP, ...input }, LAYOUT, grid);
+  sim.step({ ...STILL_STEP, ...input }, FLAT_PROJECTOR, grid);
   return dropsIn(grid);
 }
 
@@ -213,15 +233,15 @@ describe('InkSimulation: прямой переход к линиям зрите�
     expectDrop(drops[0], { ...NEW_PLACE, r: 5 });
   });
 
-  it('на середине лежит на отрезке между старым и новым местом', () => {
+  it('на середине лежит рядом с отрезком между старым и новым местом (турбулентность ×0,2)', () => {
     const { at } = retargeted({ isDirect: true });
     at(T0);
 
     const middle = at(T0 + 900)[0];
 
-    // векторное произведение (M − A) × (B − A) ≈ 0: точка на прямой
+    // расстояние до прямой AB = |(M − A) × (B − A)| / |B − A|: только слабая турбулентность, не более 25 px
     const cross = ((middle?.x ?? 0) - OLD_PLACE.x) * (NEW_PLACE.y - OLD_PLACE.y) - ((middle?.y ?? 0) - OLD_PLACE.y) * (NEW_PLACE.x - OLD_PLACE.x);
-    expect(Math.abs(cross)).toBeLessThan(1);
+    expect(Math.abs(cross) / Math.hypot(NEW_PLACE.x - OLD_PLACE.x, NEW_PLACE.y - OLD_PLACE.y)).toBeLessThan(25);
     expect(distance(middle, OLD_PLACE)).toBeGreaterThan(1);
     expect(distance(middle, NEW_PLACE)).toBeGreaterThan(1);
   });
@@ -420,5 +440,159 @@ describe('InkSimulation: дрейф при смене цели', () => {
     const start = at(T0 + 1, { drift: 0 });
 
     expect(distance(start[0], OLD_PLACE)).toBeGreaterThan(0.01);
+  });
+});
+
+describe('InkSimulation: вздрагивание точно над каплей', () => {
+  it('без анимации звезда ровно над каплей её не сдвигает', () => {
+    const calm = stepOnce(createSim(), { isReducedMotion: true });
+
+    const same = stepOnce(createSim(), { isReducedMotion: true, hover: { x: 20, y: 10 }, hoverStrength: 0.5 });
+
+    expect(same).toEqual(calm);
+  });
+});
+
+describe('InkSimulation: снос роя', () => {
+  function midFlightX(sweep: number): number {
+    const { at } = retargeted({ sweep });
+    at(T0);
+    return at(T0 + 1600)[0]?.x ?? 0;
+  }
+
+  it('при sweep = +1 капля посреди полёта правее, чем при sweep = −1', () => {
+    expect(midFlightX(1)).toBeGreaterThan(midFlightX(-1) + 100);
+  });
+
+  it('при любом знаке сноса начало и конец полёта точны', () => {
+    const { at } = retargeted({ sweep: -1 });
+
+    const start = at(T0);
+    const end = at(T0 + 3200);
+
+    expectDrop(start[0], { ...OLD_PLACE, r: 5 });
+    expectDrop(end[0], { ...NEW_PLACE, r: 5 });
+  });
+
+  it('в прямом режиме знак сноса не влияет на путь', () => {
+    const plus = retargeted({ sweep: 1, isDirect: true });
+    const minus = retargeted({ sweep: -1, isDirect: true });
+    plus.at(T0);
+    minus.at(T0);
+
+    expect(plus.at(T0 + 900)).toEqual(minus.at(T0 + 900));
+  });
+});
+
+describe('InkSimulation: глубина', () => {
+  it('у дымки (состояние 0) глубина — depthAt плюс облако ±80', () => {
+    requestedDepths.length = 0;
+
+    stepOnce(createSim(), {});
+
+    expect(requestedDepths).toHaveLength(1);
+    expect(Math.abs((requestedDepths[0] ?? 999) - depthAt(20, 10))).toBeLessThanOrEqual(80);
+  });
+
+  it('у фигуры глубина — depthAt минус рельеф 8 (самая крупная капля) плюс разброс ±1', () => {
+    requestedDepths.length = 0;
+
+    stepOnce(createSim(), { target: 1 });
+
+    expect(Math.abs((requestedDepths[0] ?? 999) - (depthAt(60, 30) - 8))).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('InkSimulation: объём дымки', () => {
+  const COUNT = 300;
+  const SAME_PLACE = Int16Array.from({ length: COUNT * 3 }, (_, i) => [2000, 1000, 50][i % 3] ?? 0);
+
+  function depthRange(target: number): number {
+    requestedDepths.length = 0;
+    const sim = new InkSimulation(COUNT, { center: CENTER, dipper: [FAR_STAR], bounds: BOUNDS, radiusScale: 1 });
+    sim.setState(0, SAME_PLACE);
+    sim.setState(1, SAME_PLACE);
+
+    stepOnce(sim, { target });
+
+    return Math.max(...requestedDepths) - Math.min(...requestedDepths);
+  }
+
+  it('дымка занимает по глубине в разы больше места, чем фигура', () => {
+    const haze = depthRange(0);
+    const figure = depthRange(1);
+
+    expect(haze).toBeGreaterThan(100);
+    expect(figure).toBeLessThan(60);
+  });
+});
+
+describe('InkSimulation: рельеф', () => {
+  it('крупная капля ближе к зрителю (меньше z), чем мелкая в том же месте', () => {
+    requestedDepths.length = 0;
+    const sim = new InkSimulation(2, { center: CENTER, dipper: [FAR_STAR], bounds: BOUNDS, radiusScale: 1 });
+    // две капли в одной точке: радиус 1,0 и 0,25 единицы
+    sim.setState(1, Int16Array.of(2000, 1000, 100, 2000, 1000, 25));
+
+    stepOnce(sim, { target: 1 });
+
+    // рельеф −20 против −5, разброс ±7 у каждой: разность не меньше 15 − 14 = 1
+    expect(requestedDepths).toHaveLength(2);
+    expect(requestedDepths[0] ?? 0).toBeLessThan(requestedDepths[1] ?? 0);
+  });
+});
+
+describe('InkSimulation: объём вдоль луча героя', () => {
+  const HERO_YAW = (20 * Math.PI) / 180;
+  const ANCHOR = 1000;
+
+  /** Камера смотрит на лист в точке капли (20, 10), глубина листа — depthAt; масштаб в точке взгляда 10. */
+  function heroProjector(cameraYaw: number): Projector {
+    const projector = new Projector();
+    projector.setView(1600, 1200);
+    projector.setPose({
+      yaw: cameraYaw,
+      pitch: 0,
+      distance: projector.focal / 10,
+      targetX: 20,
+      targetY: 10,
+      targetZ: depthAt(20, 10),
+      anchorX: ANCHOR,
+      anchorY: ANCHOR,
+    });
+    return projector;
+  }
+
+  function droppedX(heroYaw: number, cameraYaw: number): number | undefined {
+    const sim = new InkSimulation(1, { center: CENTER, dipper: [FAR_STAR], bounds: BOUNDS, radiusScale: 1 });
+    sim.setState(1, STATE_0, heroYaw);
+    const grid = createGrid();
+    sim.step({ ...STILL_STEP, target: 1 }, heroProjector(cameraYaw), grid);
+    return dropsIn(grid)[0]?.x;
+  }
+
+  it('при рыскании героя и камеры 20° проекция капли совпадает с проекцией листа без объёма', () => {
+    const flat = heroProjector(HERO_YAW).project({ x: 20, y: 10, z: depthAt(20, 10) }, { x: 0, y: 0, k: 0 });
+
+    expect(droppedX(HERO_YAW, HERO_YAW)).toBeCloseTo(flat.x, 2);
+  });
+
+  it('если камера смотрит прямо, а объём рассчитан на 20°, капля уезжает от листа', () => {
+    expect(Math.abs((droppedX(HERO_YAW, 0) ?? 0) - ANCHOR)).toBeGreaterThan(4);
+  });
+
+  it('без рыскания героя сдвига по x нет', () => {
+    expect(droppedX(0, 0)).toBeCloseTo(ANCHOR, 2);
+  });
+
+  it('глубина объёма умножается на cos ψ: при 60° половина смещения', () => {
+    requestedDepths.length = 0;
+    const sim = new InkSimulation(1, { center: CENTER, dipper: [FAR_STAR], bounds: BOUNDS, radiusScale: 1 });
+    sim.setState(1, STATE_0, Math.PI / 3);
+
+    stepOnce(sim, { target: 1 });
+
+    // объём d = −8 + разброс ±1; z = depthAt + d · cos 60° = depthAt + d / 2
+    expect(Math.abs((requestedDepths[0] ?? 999) - (depthAt(20, 10) - 4))).toBeLessThanOrEqual(0.5);
   });
 });

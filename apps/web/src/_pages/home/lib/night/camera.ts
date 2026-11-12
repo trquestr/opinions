@@ -1,41 +1,61 @@
 import { NIGHT_PHRASES } from '../../model/night-script';
 import manifest from './night-manifest.json';
 import type { Bounds, Layout, Point, Size } from './layout';
+import type { CameraPose } from './projection';
 
 /*
- * Камера ночной сцены (решено владельцем 2026-11-11): на смене фигур Н2–Н5 камера едет так, что фигура встаёт
- * в левую или правую треть экрана, а напротив неё — текст. В Н1 и с Н6 — общий план по центру.
- * Мир при этом не меняется: семь звёзд неподвижны относительно мира и едут на экране только вместе с камерой.
+ * 3D-камера ночной сцены (решено владельцем 2026-11-11, объём — 2026-11-12). Камера облетает ковш по сфере:
+ * рыскание ψ (тангаж θ остаётся 0), расстояние D до точки взгляда T. На смене фигур Н2–Н5 она встаёт под своим углом к каждой
+ * фигуре и ставит её в левую или правую треть экрана, текст — напротив. В Н1 и с Н6 — общий план, прямо.
+ * Мир не меняется: семь звёзд неподвижны относительно мира, на экране они едут только вместе с камерой.
  *
- * Кадр фигуры: масштаб s = min(0.56·W / w_f, 0.66·H / h_f) по рамке фигуры (w_f × h_f, единицы ковша),
- * центр рамки — в точке опоры A = (0.34·W или 0.66·W, 0.47·H). У общего плана опора — центр экрана.
- *
- * Ход камеры за CAMERA_MS, τ ∈ [0, 1], e = τ²(3 − 2τ):
- *   основа  — линейная смесь кадров: O = mix(O₀, O₁, e), s = mix(s₀, s₁, e), опора A = mix(A₀, A₁, e);
- *   дуга    — посреди хода камера отъезжает и снова наезжает: k_arc = 1 − 0.14·sin(πe)
- *             (на середине видно на 14% больше — галактику смены целиком, как отъезд объектива);
- *   стоянка — после прихода медленный наезд, как на долгом плане: k_hold = 1 + 0.035·smoothstep(0, 1, t_hold / 8 с);
- *   итог    — масштаб вокруг опоры: s' = s·k, O' = A + (O − A)·k, k = k_arc·k_hold.
- * Новая цель посреди хода — новый ход начинается с текущего кадра (вместе с дугой и наездом) — без рывка.
- * Сбоку текст помещается только на широком экране (SIDE_LAYOUT_QUERY); на узком камера всегда в общем плане.
+ * Кадр фигуры: масштаб в точке взгляда s = min(0.56·W / w_f, 0.66·H / h_f), T — центр рамки фигуры,
+ * опора A = (0.34·W или 0.66·W, 0.47·H), D = f / s (f — фокус проекции, projection.ts).
+ * Ход за CAMERA_MS, τ ∈ [0, 1], e = τ²(3 − 2τ): ψ, θ, T, A и D смешиваются линейно, и поверх —
+ *   дуга:    D' = D / (1 − 0.14·sin(πe)) — посреди хода камера отъезжает и снова наезжает;
+ *   стоянка: после прихода за 8 с D' = D / (1 + 0.035·h) и ψ' = ψ + 0.06·h рад (h = smoothstep(t/8 с)) —
+ *            медленный наезд с облётом на 3.5°: параллакс ковша на фоне неба виден и когда фигура стоит.
+ * Новая цель посреди хода — новый ход начинается с текущего ракурса — без рывка.
  */
 export const SIDE_LAYOUT_QUERY = '(min-aspect-ratio: 6/5)';
 export const CAMERA_MS = 3200;
+// Ширина кадра фигуры; ближний край из-за перспективы крупнее — запас до края экрана нужен
 const FIGURE_WIDTH_SHARE = 0.56;
 const FIGURE_HEIGHT_SHARE = 0.66;
 const FIGURE_CENTER_Y = 0.47;
 const SIDE_CENTER_X = { left: 0.34, right: 0.66 } as const;
 const ARC_PULL_BACK = 0.14;
 const HOLD_PUSH_IN = 0.035;
+const HOLD_ORBIT_RADIANS = 0.06;
 const HOLD_MS = 8000;
+const DEGREE = Math.PI / 180;
+const SWAY_YAW = 5 * DEGREE;
+const SWAY_PITCH = 2 * DEGREE;
+const SWAY_YAW_PERIOD_S = 14;
+const SWAY_PITCH_PERIOD_S = 19;
+
+/**
+ * Поворот фигуры (эскиз владельца 2026-11-12): как стена коридора — внешний край фигуры ближе и выше,
+ * край к центру экрана уходит вглубь; только вокруг вертикали, без наклона. Фигура слева — ψ > 0
+ * (точка справа от цели уходит вглубь: z₁ = x·sin ψ > 0), фигура справа — ψ < 0.
+ * 20° (владелец 2026-11-12: 38° по пропорции эскиза — слишком глубоко); ближний край ≈ в 1.25 раза выше дальнего.
+ */
+const FIGURE_YAW_DEGREES = 20;
 
 export type Side = keyof typeof SIDE_CENTER_X;
 
-/** Кадр камеры: где ковш на экране и в каком масштабе, ключ цели и точка, вокруг которой камера наезжает. */
+/** Ракурс-цель: поза камеры и ключ (одна и та же цель второй раз хода не запускает). */
 export interface Shot {
-  readonly frame: Layout;
   readonly key: number;
-  readonly anchor: Point;
+  readonly pose: Readonly<CameraPose>;
+  /** Вес покачивания: 1 — общий план (камера медленно покачивается, видно объём ковша), 0 — кадр фигуры. */
+  readonly sway: number;
+}
+
+/** Рыскание ракурса фигуры, рад: + у фигуры слева, − справа, 0 — фигуры нет (общий план). */
+export function figureYaw(side: Side | null): number {
+  if (side === null) return 0;
+  return (side === 'left' ? 1 : -1) * FIGURE_YAW_DEGREES * DEGREE;
 }
 
 /** Сторона экрана, где стоит фигура состояния туши: напротив текста её фразы. null — фигуры нет (общий план). */
@@ -50,20 +70,60 @@ export function figureBounds(state: number): Bounds | null {
   return manifest.figureBounds[state - 1] ?? null;
 }
 
-/** Точка опоры кадра фигуры: центр её рамки на экране. */
+/** Точка опоры кадра фигуры на экране. */
 export function figureAnchor(view: Size, side: Side): Point {
   return { x: view.width * SIDE_CENTER_X[side], y: view.height * FIGURE_CENTER_Y };
 }
 
-export function figureFrame(view: Size, bounds: Bounds, side: Side): Layout {
+interface ShotInput {
+  readonly view: Size;
+  readonly focal: number;
+  readonly key: number;
+}
+
+/** Общий план: прямо, точка взгляда — то место мира, что плоская раскладка ставит в центр экрана. */
+export function overviewShot(input: ShotInput, overview: Layout): Shot {
+  const { view, focal, key } = input;
+  const anchorX = view.width / 2;
+  const anchorY = view.height / 2;
+  return {
+    key,
+    sway: 1,
+    pose: {
+      yaw: 0,
+      pitch: 0,
+      distance: focal / overview.scale,
+      targetX: (anchorX - overview.originX) / overview.scale,
+      targetY: (anchorY - overview.originY) / overview.scale,
+      targetZ: 0,
+      anchorX,
+      anchorY,
+    },
+  };
+}
+
+/** Кадр фигуры: под своим углом, сбоку экрана. */
+export function figureShot(input: ShotInput, figure: { readonly state: number; readonly bounds: Bounds; readonly side: Side }): Shot {
+  const { view, focal, key } = input;
+  const { bounds } = figure;
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
   const scale = Math.min((view.width * FIGURE_WIDTH_SHARE) / width, (view.height * FIGURE_HEIGHT_SHARE) / height);
-  const anchor = figureAnchor(view, side);
+  const anchor = figureAnchor(view, figure.side);
+  const yaw = figureYaw(figure.side);
   return {
-    scale,
-    originX: anchor.x - (bounds.minX + width / 2) * scale,
-    originY: anchor.y - (bounds.minY + height / 2) * scale,
+    key,
+    sway: 0,
+    pose: {
+      yaw,
+      pitch: 0,
+      distance: focal / scale,
+      targetX: bounds.minX + width / 2,
+      targetY: bounds.minY + height / 2,
+      targetZ: 0,
+      anchorX: anchor.x,
+      anchorY: anchor.y,
+    },
   };
 }
 
@@ -76,57 +136,60 @@ function smoothstep(x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Кадр и опора — то, что смешивается при ходе. Мутируемые поля: объекты живут всю сцену. */
-interface Pose {
-  originX: number;
-  originY: number;
-  scale: number;
-  anchorX: number;
-  anchorY: number;
+const POSE_KEYS = ['yaw', 'pitch', 'distance', 'targetX', 'targetY', 'targetZ', 'anchorX', 'anchorY'] as const;
+
+function emptyPose(): CameraPose {
+  return { yaw: 0, pitch: 0, distance: 1, targetX: 0, targetY: 0, targetZ: 0, anchorX: 0, anchorY: 0 };
 }
 
-function setPose(target: Pose, shot: Shot): void {
-  target.originX = shot.frame.originX;
-  target.originY = shot.frame.originY;
-  target.scale = shot.frame.scale;
-  target.anchorX = shot.anchor.x;
-  target.anchorY = shot.anchor.y;
+function copyPose(target: CameraPose, source: Readonly<CameraPose>): void {
+  for (const key of POSE_KEYS) target[key] = source[key];
 }
 
 export class Camera {
-  /** Текущий кадр. Один объект на всю сцену, меняется на месте (без аллокаций в rAF). */
-  readonly current = { originX: 0, originY: 0, scale: 1 };
-  private readonly from: Pose = { originX: 0, originY: 0, scale: 1, anchorX: 0, anchorY: 0 };
-  private readonly to: Pose = { originX: 0, originY: 0, scale: 1, anchorX: 0, anchorY: 0 };
-  /** Опора текущего кадра — нужна, чтобы новый ход начался ровно оттуда, где камера сейчас. */
-  private anchorX = 0;
-  private anchorY = 0;
+  /** Текущий ракурс. Один объект на всю сцену, меняется на месте (без аллокаций в rAF). */
+  readonly current: CameraPose = emptyPose();
+  private readonly from: CameraPose = emptyPose();
+  private readonly to: CameraPose = emptyPose();
+  /** Ракурс без дуги и стоянки — с него начинается следующий ход. */
+  private readonly base: CameraPose = emptyPose();
   private startMs = -Infinity;
   private aimKey: number | null = null;
+  private fromSway = 0;
+  private toSway = 0;
+  /** Текущий вес покачивания — с него начинается следующий ход. */
+  private sway = 0;
+  /** Поворот за курсором (рад), см. setLook; в снимок хода не входит. */
+  private lookYaw = 0;
+  private lookPitch = 0;
 
-  /** Сразу встать в кадр без хода (первый кадр, ресайз, без анимации). */
+  /** Сразу встать в ракурс без хода (первый кадр, ресайз, без анимации). */
   snap(shot: Shot): void {
-    setPose(this.to, shot);
-    setPose(this.from, shot);
+    copyPose(this.from, shot.pose);
+    copyPose(this.to, shot.pose);
+    copyPose(this.base, shot.pose);
+    copyPose(this.current, shot.pose);
+    this.fromSway = shot.sway;
+    this.toSway = shot.sway;
+    this.sway = shot.sway;
     this.aimKey = shot.key;
     this.startMs = -Infinity;
-    this.apply(1, 1 + HOLD_PUSH_IN);
   }
 
-  /** Новая цель: ход от текущего кадра. Та же цель — ничего не делает; самая первая — встать сразу. */
+  /** Новая цель: ход от текущего ракурса. Та же цель — ничего не делает; самая первая — встать сразу. */
   aim(shot: Shot, nowMs: number): void {
     if (shot.key === this.aimKey) return;
     if (this.aimKey === null) {
       this.snap(shot);
       return;
     }
-    const { from, current } = this;
-    from.originX = current.originX;
-    from.originY = current.originY;
-    from.scale = current.scale;
-    from.anchorX = this.anchorX;
-    from.anchorY = this.anchorY;
-    setPose(this.to, shot);
+    copyPose(this.from, this.current);
+    // Поворот за курсором живёт поверх хода: в начало хода его не запекаем, иначе он применится дважды
+    this.from.yaw -= this.lookYaw;
+    this.from.pitch -= this.lookPitch;
+    copyPose(this.to, shot.pose);
+    this.fromSway = this.sway;
+    this.toSway = shot.sway;
     this.aimKey = shot.key;
     this.startMs = nowMs;
   }
@@ -136,23 +199,43 @@ export class Camera {
     return Math.min(1, Math.max(0, (nowMs - this.startMs) / CAMERA_MS));
   }
 
-  /** Двигает камеру; возвращает, меняется ли кадр (ход или медленный наезд на стоянке). */
-  update(nowMs: number): boolean {
+  /**
+   * Двигает камеру; возвращает, меняется ли ракурс (ход, стоянка, покачивание).
+   * isStill — без анимации (prefers-reduced-motion): ни покачивания, ни наезда на стоянке.
+   */
+  update(nowMs: number, isStill = false): boolean {
     const e = smoothstep(this.progress(nowMs));
-    const holdMs = nowMs - this.startMs - CAMERA_MS;
-    const arc = 1 - ARC_PULL_BACK * Math.sin(Math.PI * e);
-    const hold = holdMs > 0 ? 1 + HOLD_PUSH_IN * smoothstep(holdMs / HOLD_MS) : 1;
-    this.apply(e, arc * hold);
-    return e < 1 || holdMs < HOLD_MS;
+    for (const key of POSE_KEYS) this.base[key] = lerp(this.from[key], this.to[key], e);
+    copyPose(this.current, this.base);
+    const hold = isStill ? 0 : this.holdAt(nowMs);
+    this.current.distance = this.base.distance / ((1 - ARC_PULL_BACK * Math.sin(Math.PI * e)) * (1 + HOLD_PUSH_IN * hold));
+    this.current.yaw = this.base.yaw + HOLD_ORBIT_RADIANS * hold;
+    this.sway = lerp(this.fromSway, this.toSway, e);
+    const isSwaying = !isStill && this.sway > 0;
+    if (isSwaying) this.applySway(nowMs / 1000);
+    this.current.yaw += this.lookYaw;
+    this.current.pitch += this.lookPitch;
+    return e < 1 || (hold > 0 && hold < 1) || isSwaying;
   }
 
-  /** Смесь кадров с долей e и масштабирование вокруг опоры в k раз. */
-  private apply(e: number, k: number): void {
-    const { from, to, current } = this;
-    this.anchorX = lerp(from.anchorX, to.anchorX, e);
-    this.anchorY = lerp(from.anchorY, to.anchorY, e);
-    current.scale = lerp(from.scale, to.scale, e) * k;
-    current.originX = this.anchorX + (lerp(from.originX, to.originX, e) - this.anchorX) * k;
-    current.originY = this.anchorY + (lerp(from.originY, to.originY, e) - this.anchorY) * k;
+  /** Поворот ракурса за курсором, рад (сглаживает сцена): добавляется к ракурсу поверх хода, дуги и покачивания. */
+  setLook(yaw: number, pitch: number): void {
+    this.lookYaw = yaw;
+    this.lookPitch = pitch;
+  }
+
+  /** Доля стоянки после прихода, 0…1 (0 — ещё едет или встала без хода). */
+  private holdAt(nowMs: number): number {
+    const holdMs = nowMs - this.startMs - CAMERA_MS;
+    return holdMs > 0 && Number.isFinite(holdMs) ? smoothstep(holdMs / HOLD_MS) : 0;
+  }
+
+  /**
+   * Покачивание общего плана: ψ += w·5°·sin(2πt/14), θ += w·2°·sin(2πt/19 + 1) — два несоизмеримых периода,
+   * движение не повторяется; при повороте звёзды ковша на разной глубине смещаются друг относительно друга.
+   */
+  private applySway(t: number): void {
+    this.current.yaw += this.sway * SWAY_YAW * Math.sin((2 * Math.PI * t) / SWAY_YAW_PERIOD_S);
+    this.current.pitch += this.sway * SWAY_PITCH * Math.sin((2 * Math.PI * t) / SWAY_PITCH_PERIOD_S + 1);
   }
 }

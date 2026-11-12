@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NIGHT_EPILOGUE, NIGHT_PHRASES } from '../../model/night-script';
-import { figureBounds } from './camera';
+import { Camera, figureBounds } from './camera';
+import manifest from './night-manifest.json';
+import { Projector } from './projection';
 import { Cursor } from './cursor';
 import { CursorField } from './cursor-field';
 import { FINISH_IDLE_MS } from './drawing';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
-import { computeLayout, unitsToPx } from './layout';
 import { startNightScene } from './scene';
-import { DRAWABLE_STARS, FIGURE_BOUNDS } from './stars';
+import { STAR_STRIDE } from './stars';
 import type { NightElements } from './scene';
 
 const mocks = vi.hoisted(() => ({
@@ -27,7 +28,8 @@ vi.mock('./ink', async (importActual) => ({
 }));
 
 const VIEW = { width: 1000, height: 800 };
-const LAYOUT = computeLayout(VIEW, FIGURE_BOUNDS);
+/** Звёзд для рисования (ковш и тусклые) — последние строки таблицы звёзд. */
+const DRAWABLE_COUNT = 14;
 const EPILOGUE_DELAY_MS = 900;
 
 let top = 0;
@@ -36,7 +38,7 @@ let observerCallback: IntersectionObserverCallback | null = null;
 let stop: (() => void) | null = null;
 
 function createRendererSpy() {
-  return { resize: vi.fn(), setLayout: vi.fn(), uploadInk: vi.fn(), uploadCursor: vi.fn(), render: vi.fn(), dispose: vi.fn() };
+  return { resize: vi.fn(), uploadStars: vi.fn(), uploadInk: vi.fn(), uploadCursor: vi.fn(), render: vi.fn(), dispose: vi.fn() };
 }
 
 function buildElements(): NightElements {
@@ -79,8 +81,15 @@ function stubMedia(...matching: string[]): void {
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: matching.some((part) => query.includes(part)) })));
 }
 
+/** Экранное положение звезды для рисования: берём из живой таблицы звёзд, которую сцена отдала рендереру. */
+function starPoint(index: number): { x: number; y: number } {
+  const table: Float32Array = mocks.createNightRenderer.mock.calls.at(-1)?.[1].stars;
+  const at = (table.length / STAR_STRIDE - DRAWABLE_COUNT + index) * STAR_STRIDE;
+  return { x: table[at] ?? 0, y: table[at + 1] ?? 0 };
+}
+
 function pressStar(elements: NightElements, index: number): void {
-  const point = unitsToPx(LAYOUT, DRAWABLE_STARS[index] ?? { x: 0, y: 0 });
+  const point = starPoint(index);
   elements.stage.dispatchEvent(new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }));
 }
 
@@ -91,6 +100,8 @@ function start(elements: NightElements) {
 let spy = createRendererSpy();
 const spyOnSetState = () => vi.spyOn(InkSimulation.prototype, 'setState');
 const spyOnStep = () => vi.spyOn(InkSimulation.prototype, 'step');
+const spyOnSetPose = () => vi.spyOn(Projector.prototype, 'setPose');
+let setPose: ReturnType<typeof spyOnSetPose>;
 let setState: ReturnType<typeof spyOnSetState>;
 let stepSpy: ReturnType<typeof spyOnStep>;
 
@@ -101,6 +112,7 @@ beforeEach(() => {
   observerCallback = null;
   spy = createRendererSpy();
   setState = spyOnSetState();
+  setPose = spyOnSetPose();
   stepSpy = spyOnStep();
   mocks.createNightRenderer.mockReturnValue(spy);
   mocks.loadFigures.mockResolvedValue([new Int16Array(3), new Int16Array(6), new Int16Array(9), new Int16Array(12)]);
@@ -211,6 +223,20 @@ describe('startNightScene: DOM по скроллу', () => {
     expect(spy.render.mock.calls[0]?.[0]).toMatchObject({ starTimeSeconds: 0 });
   });
 
+  it('снос роя идёт в сторону новой фигуры: к левой фигуре −1, к правой +1', () => {
+    start(buildElements());
+
+    scrollTo(1.2);
+    flushFrames();
+    const left = stepSpy.mock.calls.at(-1)?.[0].sweep;
+    scrollTo(2);
+    flushFrames();
+    const right = stepSpy.mock.calls.at(-1)?.[0].sweep;
+
+    expect(left).toBe(-1);
+    expect(right).toBe(1);
+  });
+
   it('пока сцена на экране, просит следующий кадр сама', () => {
     const elements = buildElements();
     start(elements);
@@ -305,7 +331,7 @@ describe('startNightScene: рисование в Н9', () => {
     const elements = buildElements();
     start(elements);
     scrollTo(0.5);
-    const point = unitsToPx(LAYOUT, DRAWABLE_STARS[0] ?? { x: 0, y: 0 });
+    const point = starPoint(0);
 
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: point.x, clientY: point.y }));
     flushFrames();
@@ -453,7 +479,7 @@ describe('startNightScene: рисование в Н9', () => {
     start(elements);
     scrollTo(5.5);
     const press = (index: number) => {
-      const point = unitsToPx(LAYOUT, DRAWABLE_STARS[index] ?? { x: 0, y: 0 });
+      const point = starPoint(index);
       const event = Object.assign(new MouseEvent('pointerdown', { clientX: point.x, clientY: point.y, bubbles: true }), {
         pointerType: 'mouse',
       });
@@ -631,7 +657,13 @@ describe('startNightScene: камера', () => {
   const bounds = figureBounds(1);
   const FIGURE_1_CENTER_X = ((bounds?.minX ?? 0) + (bounds?.maxX ?? 0)) / 2;
 
-  it('на широком экране камера едет к фигуре и в конце ставит её левее центра', () => {
+  function lastPose() {
+    const call = setPose.mock.calls.at(-1);
+    if (!call) throw new Error('setPose не вызывался');
+    return call[0];
+  }
+
+  it('на широком экране камера приезжает к медведице: цель — центр рамки, опора на 0,34·W, камера повёрнута к фигуре слева', () => {
     stubMedia('min-aspect-ratio');
     start(buildElements());
     scrollTo(1.2);
@@ -639,24 +671,13 @@ describe('startNightScene: камера', () => {
     flushAt(1000);
     flushAt(1000 + 3200);
 
-    const [layout] = spy.setLayout.mock.calls.at(-1) ?? [];
-    // центр рамки медведицы встаёт в 0,34·W = 340 px на экране шириной 1000
-    expect(layout.originX + FIGURE_1_CENTER_X * layout.scale).toBeCloseTo(340, 1);
+    expect(lastPose().targetX).toBeCloseTo(FIGURE_1_CENTER_X, 5);
+    expect(lastPose().anchorX).toBeCloseTo(340, 3);
+    expect(lastPose().yaw).toBeGreaterThan(0);
+    expect(lastPose().pitch).toBe(0);
   });
 
-  it('на широком экране рендереру уходит ненулевой параллакс', () => {
-    stubMedia('min-aspect-ratio');
-    start(buildElements());
-    scrollTo(1.2);
-
-    flushAt(1000);
-    flushAt(1000 + 3200);
-
-    const [, parallax] = spy.setLayout.mock.calls.at(-1) ?? [];
-    expect(Math.abs(parallax.x)).toBeGreaterThan(1);
-  });
-
-  it('на узком экране камера остаётся в общем плане', () => {
+  it('на узком экране камера остаётся в общем плане: качается не больше 5° и 2°, опора в центре', () => {
     stubMedia();
     start(buildElements());
     scrollTo(1.2);
@@ -664,9 +685,19 @@ describe('startNightScene: камера', () => {
     flushAt(1000);
     flushAt(1000 + 3200);
 
-    const [layout, parallax] = spy.setLayout.mock.calls.at(-1) ?? [];
-    expect(layout.scale).toBeCloseTo(computeLayout(VIEW, FIGURE_BOUNDS).scale, 5);
-    expect(parallax.x).toBeCloseTo(0, 5);
+    expect(Math.abs(lastPose().yaw)).toBeLessThanOrEqual((5 * Math.PI) / 180 + 1e-9);
+    expect(Math.abs(lastPose().pitch)).toBeLessThanOrEqual((2 * Math.PI) / 180 + 1e-9);
+    expect(lastPose().anchorX).toBe(500);
+    expect(lastPose().anchorY).toBe(400);
+  });
+
+  it('в кадре отдаёт рендереру таблицу звёзд', () => {
+    start(buildElements());
+
+    scrollTo(0.5);
+    flushFrames();
+
+    expect(spy.uploadStars).toHaveBeenCalledWith(expect.any(Float32Array));
   });
 
   it('боковая фраза на широком экране гаснет при смене фигуры и проступает, когда камера доехала', () => {
@@ -702,8 +733,198 @@ describe('startNightScene: камера', () => {
 
     flushAt(1000);
 
-    const [layout] = spy.setLayout.mock.calls.at(-1) ?? [];
-    expect(layout.originX + FIGURE_1_CENTER_X * layout.scale).toBeCloseTo(340, 1);
+    expect(lastPose().anchorX).toBeCloseTo(340, 3);
+    expect(lastPose().yaw).toBeGreaterThan(0);
     expect(elements.phrases[1]?.style.opacity).toBe('1');
+  });
+});
+
+describe('startNightScene: курсор и экран', () => {
+  it('движение мыши до начала сцены курсору не передаётся', () => {
+    const move = vi.spyOn(Cursor.prototype, 'move');
+    start(buildElements());
+
+    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: 40, clientY: 50 }), { pointerType: 'mouse' }));
+
+    expect(move).not.toHaveBeenCalled();
+  });
+
+  it('на телефоне грузит файл с меньшим числом капель, на десктопе — с большим', async () => {
+    stubMedia('max-width');
+    start(buildElements());
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.advanceTimersByTimeAsync(0);
+    const phoneCount = mocks.loadFigures.mock.calls[0]?.[0];
+
+    expect(phoneCount).toBe(manifest.counts[1]);
+  });
+
+  it('на десктопе грузит файл с полным числом капель', async () => {
+    stubMedia();
+    start(buildElements());
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.loadFigures.mock.calls[0]?.[0]).toBe(manifest.counts[0]);
+  });
+});
+
+describe('startNightScene: взгляд за курсором', () => {
+  const DEGREE = Math.PI / 180;
+
+  function mouseMove(x: number, y: number, pointerType = 'mouse'): void {
+    window.dispatchEvent(Object.assign(new MouseEvent('pointermove', { clientX: x, clientY: y }), { pointerType }));
+  }
+
+  /** Серия кадров с шагом 50 мс — взгляд успевает догнать цель. */
+  function runFrames(count: number): void {
+    Array.from({ length: count }, (_, k) => k).forEach((k) => flushAt(1000 + 50 * k));
+  }
+
+  function lastLook(setLook: ReturnType<typeof vi.spyOn>): { yaw: number; pitch: number } {
+    const call = setLook.mock.calls.at(-1);
+    if (!call) throw new Error('setLook не вызывался');
+    return { yaw: call[0], pitch: call[1] };
+  }
+
+  it.each([
+    { edge: 'правому', x: 1000, sign: -1 },
+    { edge: 'левому', x: 0, sign: 1 },
+  ])('мышь у $edge краю поворачивает камеру: знак рыскания $sign', ({ x, sign }) => {
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(0.5);
+
+    mouseMove(x, 400);
+    runFrames(40);
+
+    expect(Math.sign(lastLook(setLook).yaw)).toBe(sign);
+    expect(Math.abs(lastLook(setLook).yaw)).toBeCloseTo(3 * DEGREE, 3);
+  });
+
+  it.each([
+    ['верху', 0, 1],
+    ['низу', 800, -1],
+  ])('мышь у %s экрана наклоняет камеру: знак наклона %s', (_, y, sign) => {
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(0.5);
+
+    mouseMove(500, y);
+    runFrames(40);
+
+    expect(Math.sign(lastLook(setLook).pitch)).toBe(sign);
+  });
+
+  it('в Н9 (u ≥ 5,6) взгляд за курсором выключен', () => {
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(5.8);
+
+    mouseMove(1000, 400);
+    runFrames(40);
+
+    expect(lastLook(setLook).yaw).toBeCloseTo(0, 6);
+  });
+
+  it('при prefers-reduced-motion взгляд за курсором выключен', () => {
+    stubMedia('prefers-reduced-motion');
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(0.5);
+
+    mouseMove(1000, 400);
+    runFrames(10);
+
+    expect(lastLook(setLook).yaw).toBeCloseTo(0, 6);
+  });
+
+  it('касание взгляд не двигает', () => {
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(0.5);
+
+    mouseMove(1000, 400, 'touch');
+    runFrames(10);
+
+    expect(lastLook(setLook).yaw).toBeCloseTo(0, 6);
+  });
+
+  it('когда мышь уходит с окна, взгляд возвращается в ноль', () => {
+    const setLook = vi.spyOn(Camera.prototype, 'setLook');
+    start(buildElements());
+    scrollTo(0.5);
+    mouseMove(1000, 400);
+    runFrames(40);
+
+    document.dispatchEvent(new Event('mouseleave'));
+    runFrames(80);
+
+    expect(Math.abs(lastLook(setLook).yaw)).toBeLessThan(0.01 * DEGREE);
+  });
+});
+
+describe('startNightScene: объём фигур по ракурсу героя', () => {
+  const DEGREE = Math.PI / 180;
+
+  async function loadFigures(): Promise<void> {
+    observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  function yawOf(setStateSpy: typeof setState, state: number): number | undefined {
+    return setStateSpy.mock.calls.find((args) => args[0] === state)?.[2];
+  }
+
+  it('на широком экране фигуры получают ракурс ±20°: слева плюс, справа минус', async () => {
+    stubMedia('min-aspect-ratio');
+    start(buildElements());
+
+    await loadFigures();
+
+    expect(yawOf(setState, 1)).toBeCloseTo(20 * DEGREE, 8);
+    expect(yawOf(setState, 2)).toBeCloseTo(-20 * DEGREE, 8);
+    expect(yawOf(setState, 3)).toBeCloseTo(20 * DEGREE, 8);
+    expect(yawOf(setState, 4)).toBeCloseTo(-20 * DEGREE, 8);
+  });
+
+  it('на узком экране ракурс героя нулевой', async () => {
+    stubMedia();
+    start(buildElements());
+
+    await loadFigures();
+
+    expect([1, 2, 3, 4].map((state) => yawOf(setState, state))).toEqual([0, 0, 0, 0]);
+  });
+
+  it('когда раскладка с боковым текстом переключается при ресайзе, состояния задаются заново', async () => {
+    let isWide = true;
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        get matches() {
+          return query.includes('min-aspect-ratio') && isWide;
+        },
+      })),
+    );
+    start(buildElements());
+    await loadFigures();
+    setState.mockClear();
+
+    isWide = false;
+    window.dispatchEvent(new Event('resize'));
+
+    expect([1, 2, 3, 4].map((state) => yawOf(setState, state))).toEqual([0, 0, 0, 0]);
+  });
+
+  it('если раскладка не изменилась, состояния при ресайзе не пересчитываются', async () => {
+    stubMedia('min-aspect-ratio');
+    start(buildElements());
+    await loadFigures();
+    setState.mockClear();
+
+    window.dispatchEvent(new Event('resize'));
+
+    expect(yawOf(setState, 1)).toBeUndefined();
   });
 });

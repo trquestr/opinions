@@ -40,7 +40,7 @@ only by the owner's decision. The root `postinstall` builds the contracts.
 | `apps/web/app/` | Next routing only: thin re-exports from `src/` |
 | `apps/web/src/_app/` | Root layout, `styles/globals.css` (Tailwind, `@theme`, fonts), base metadata, robots, sitemap |
 | `apps/web/src/_pages/home/` | Landing: `ui/hero.tsx`, `ui/landing-scripts.tsx` (loads the hero modules after hydration), `landing.css` |
-| `apps/web/src/_pages/home/lib/night/` | Night scene (承) prototype in TypeScript: `timeline.ts` (frames Н1–Н9 as a pure function of scroll), `renderer.ts` + `shaders.ts` (WebGL2 ink, stars, lines), `scene.ts` (scroll, drawing, DOM); markup `ui/night-scene.tsx`, texts `model/night-script.ts` |
+| `apps/web/src/_pages/home/lib/night/` | Night scene (承) prototype in TypeScript: `timeline.ts` (frames Н1–Н9 as a pure function of scroll), `camera.ts` + `projection.ts` (3D camera on a sphere, one perspective projection for ink, stars, lines and hit tests), `renderer.ts` + `shaders.ts` (WebGL2 ink, stars, lines), `scene.ts` (scroll, drawing, DOM); markup `ui/night-scene.tsx`, texts `model/night-script.ts` |
 | `apps/web/src/_pages/errors/` | Error, global error and 404 pages |
 | `apps/web/src/shared/lib/theme/`, `src/features/theme-switch/` | Two themes: pre-paint script, `applyTheme`/`useTheme`; switch (not placed yet) |
 | `apps/web/src/shared/` | `api` (serverApi / userServerApi / browserApi), `config` (zod env, site, security-headers), `ui`, `lib` |

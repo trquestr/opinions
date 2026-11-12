@@ -71,4 +71,27 @@ describe('NightSceneDriver', () => {
 
     expect(stop).toHaveBeenCalledTimes(1);
   });
+
+  it('если размонтировали до загрузки чанка, сцена не запускается', async () => {
+    mountRoot(SCENE_HTML);
+
+    const { unmount } = render(<NightSceneDriver rootId="night" />);
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(startNightScene).not.toHaveBeenCalled();
+  });
+
+  it('ошибку запуска сцены пишет в консоль и не падает', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    startNightScene.mockImplementationOnce(() => {
+      throw new Error('нет WebGL');
+    });
+    mountRoot(SCENE_HTML);
+
+    render(<NightSceneDriver rootId="night" />);
+    await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
+
+    error.mockRestore();
+  });
 });

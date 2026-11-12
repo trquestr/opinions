@@ -4,7 +4,7 @@ import { inkFragment, INK_VERTEX, LINE_FRAGMENT, LINE_VERTEX, STAR_FRAGMENT, STA
 import { STAR_STRIDE } from './stars';
 import type { CursorField } from './cursor-field';
 import type { InkGrid } from './ink-grid';
-import type { Layout, Point, Size } from './layout';
+import type { Size } from './layout';
 
 /*
  * WebGL2-рендерер ночной сцены. Ничего не решает сам: что рисовать, говорит RenderInput от сцены.
@@ -26,6 +26,9 @@ export interface RenderInput {
   inviteStars: number;
   /** Время сияния звёзд, с (без анимации — стоит). */
   starTimeSeconds: number;
+  /** Ракурс камеры (рыскание, тангаж, рад): от него зависят блик и поворот лучей звёзд. */
+  viewYaw: number;
+  viewPitch: number;
   outlineAlpha: number;
   userLinesAlpha: number;
   /** x0, y0, x1, y1 в единицах ковша; сначала контур ковша (outlineCount), потом линии зрителя. */
@@ -36,9 +39,9 @@ export interface RenderInput {
 }
 
 export interface NightRenderer {
-  resize(view: Size, layout: Layout): void;
-  /** Кадр камеры: где ковш на экране и в каком масштабе, плюс сдвиг фоновых звёзд (px). */
-  setLayout(layout: Layout, parallax: Point): void;
+  resize(view: Size): void;
+  /** Звёзды кадра (экранные px после проекции): таблица переписывается на месте и грузится в буфер. */
+  uploadStars(table: Float32Array): void;
   /** Загружает сетку капель кадра в текстуру. */
   uploadInk(grid: InkGrid): void;
   /** Капли курсора кадра (их немного — uniform-массив, как в прологе). */
@@ -68,6 +71,8 @@ export function createInputState(): RenderInput {
     dipperStars: 0,
     inviteStars: 0,
     starTimeSeconds: 0,
+    viewYaw: 0,
+    viewPitch: 0,
     outlineAlpha: 0,
     userLinesAlpha: 0,
     segments: new Float32Array(MAX_LINE_SEGMENTS * 4),
@@ -117,7 +122,7 @@ function bindStars(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, star
   const stride = STAR_STRIDE * Float32Array.BYTES_PER_ELEMENT;
   gl.bindVertexArray(vao);
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, stars, gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, stars, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 0);
   gl.vertexAttribDivisor(1, 1);
@@ -130,7 +135,7 @@ function bindStars(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, star
   return buffer;
 }
 
-const VIEW_UNIFORMS = ['uOrigin', 'uScale', 'uView'] as const;
+const VIEW_UNIFORMS = ['uView'] as const;
 
 export function createNightRenderer(canvas: HTMLCanvasElement, options: RendererOptions): NightRenderer | null {
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false });
@@ -151,6 +156,7 @@ class WebglNightRenderer implements NightRenderer {
   private readonly buffers: WebGLBuffer[];
   private readonly inkTexture: WebGLTexture;
   private readonly starCount: number;
+  private readonly starBuffer: WebGLBuffer;
   private textureWidth = 0;
   private textureHeight = 0;
 
@@ -170,12 +176,13 @@ class WebglNightRenderer implements NightRenderer {
       'uCursorBBox',
     ]);
     this.lines = createPass(gl, [LINE_VERTEX, LINE_FRAGMENT], [...VIEW_UNIFORMS, 'uSegments', 'uOutlineCount', 'uAlpha', 'uWidth']);
-    this.stars = createPass(gl, [STAR_VERTEX, STAR_FRAGMENT], [...VIEW_UNIFORMS, 'uAlpha', 'uTime', 'uParallax']);
+    this.stars = createPass(gl, [STAR_VERTEX, STAR_FRAGMENT], [...VIEW_UNIFORMS, 'uAlpha', 'uTime', 'uViewAngle']);
+    this.starBuffer = bindStars(gl, this.stars.vao, options.stars);
     this.buffers = [
       bindCorners(gl, this.ink.vao, QUAD),
       bindCorners(gl, this.lines.vao, STRIP),
       bindCorners(gl, this.stars.vao, QUAD),
-      bindStars(gl, this.stars.vao, options.stars),
+      this.starBuffer,
     ];
     this.inkTexture = createGridTexture(gl);
     this.starCount = options.stars.length / STAR_STRIDE;
@@ -187,7 +194,7 @@ class WebglNightRenderer implements NightRenderer {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
-  resize(view: Size, layout: Layout): void {
+  resize(view: Size): void {
     const { gl, canvas } = this;
     const dpr = Math.min(window.devicePixelRatio || 1, DPR_LIMIT);
     canvas.width = Math.round(view.width * dpr);
@@ -197,20 +204,15 @@ class WebglNightRenderer implements NightRenderer {
       gl.useProgram(pass.program);
       gl.uniform2f(pass.u.uView ?? null, view.width, view.height);
     });
-    this.setLayout(layout, { x: 0, y: 0 });
     gl.useProgram(this.ink.program);
     gl.uniform1f(this.ink.u.uDpr ?? null, canvas.width / view.width);
     gl.uniform1f(this.ink.u.uViewHeight ?? null, view.height);
   }
 
-  setLayout(layout: Layout, parallax: Point): void {
+  uploadStars(table: Float32Array): void {
     const { gl } = this;
-    [this.lines, this.stars].forEach((pass) => {
-      gl.useProgram(pass.program);
-      gl.uniform2f(pass.u.uOrigin ?? null, layout.originX, layout.originY);
-      gl.uniform1f(pass.u.uScale ?? null, layout.scale);
-    });
-    gl.uniform2f(this.stars.u.uParallax ?? null, parallax.x, parallax.y);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.starBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, table);
   }
 
   /** Сетка меняет размер только при ресайзе — тогда texImage2D, иначе более дешёвый texSubImage2D. */
@@ -288,6 +290,7 @@ class WebglNightRenderer implements NightRenderer {
     gl.bindVertexArray(stars.vao);
     gl.uniform3f(stars.u.uAlpha ?? null, input.backgroundStars, input.dipperStars, input.inviteStars);
     gl.uniform1f(stars.u.uTime ?? null, input.starTimeSeconds);
+    gl.uniform2f(stars.u.uViewAngle ?? null, input.viewYaw, input.viewPitch);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.starCount);
   }
 }

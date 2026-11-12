@@ -37,7 +37,13 @@ function createFakeGl(overrides: Record<string, unknown> = {}) {
   );
   // Тестовая подмена: прокси ведёт себя как контекст, но типом он не является.
   const gl = target as unknown as WebGL2RenderingContext;
-  return { gl, calls: (name: string) => (target as Record<string, ReturnType<typeof vi.fn>>)[name]?.mock.calls ?? [] };
+  const mockOf = (name: string) => (target as Record<string, ReturnType<typeof vi.fn>>)[name]?.mock;
+  return {
+    gl,
+    calls: (name: string) => mockOf(name)?.calls ?? [],
+    /** Глобальные номера вызовов: по ним видно порядок между разными методами. */
+    orders: (name: string) => mockOf(name)?.invocationCallOrder ?? [],
+  };
 }
 
 type FakeGl = ReturnType<typeof createFakeGl>;
@@ -46,7 +52,6 @@ const OPTIONS: RendererOptions = {
   // две звезды по 5 чисел
   stars: new Float32Array(14),
 };
-const LAYOUT = { originX: 10, originY: 20, scale: 3 };
 
 function createRenderer(fake: FakeGl, options: RendererOptions = OPTIONS) {
   const canvas = document.createElement('canvas');
@@ -116,7 +121,7 @@ describe('resize', () => {
     const fake = createFakeGl();
     const { canvas, renderer } = createRenderer(fake);
 
-    renderer?.resize({ width: 400, height: 300 }, LAYOUT);
+    renderer?.resize({ width: 400, height: 300 });
 
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(600);
@@ -128,7 +133,7 @@ describe('resize', () => {
     const fake = createFakeGl();
     const { canvas, renderer } = createRenderer(fake);
 
-    renderer?.resize({ width: 400, height: 300 }, LAYOUT);
+    renderer?.resize({ width: 400, height: 300 });
 
     expect(canvas.width).toBe(400);
   });
@@ -138,32 +143,33 @@ describe('resize', () => {
     const fake = createFakeGl();
     const { renderer } = createRenderer(fake);
 
-    renderer?.resize({ width: 400, height: 300 }, LAYOUT);
+    renderer?.resize({ width: 400, height: 300 });
 
     expect(fake.calls('uniform1f').map((args) => args[1])).toEqual(expect.arrayContaining([2, 300]));
   });
 });
 
-describe('setLayout', () => {
-  it('передаёт линиям и звёздам начало и масштаб, звёздам — параллакс', () => {
+describe('uploadStars', () => {
+  it('переписывает буфер звёзд с нуля через bufferSubData', () => {
     const fake = createFakeGl();
     const { renderer } = createRenderer(fake);
+    const table = new Float32Array(10);
 
-    renderer?.setLayout({ originX: 10, originY: 20, scale: 3 }, { x: 4, y: 5 });
+    renderer?.uploadStars(table);
 
-    const pairs = fake.calls('uniform2f').map((args) => args.slice(1));
-    expect(pairs).toContainEqual([10, 20]);
-    expect(pairs).toContainEqual([4, 5]);
-    expect(fake.calls('uniform1f').map((args) => args[1])).toContain(3);
+    expect(fake.calls('bufferSubData')).toHaveLength(1);
+    expect(fake.calls('bufferSubData')[0]?.slice(1)).toEqual([0, table]);
   });
+});
 
-  it('resize сбрасывает параллакс в ноль', () => {
+describe('resize: экран', () => {
+  it('передаёт линиям и звёздам размер экрана', () => {
     const fake = createFakeGl();
     const { renderer } = createRenderer(fake);
 
-    renderer?.resize({ width: 400, height: 300 }, LAYOUT);
+    renderer?.resize({ width: 400, height: 300 });
 
-    expect(fake.calls('uniform2f').map((args) => args.slice(1))).toContainEqual([0, 0]);
+    expect(fake.calls('uniform2f').map((args) => args.slice(1))).toContainEqual([400, 300]);
   });
 });
 
@@ -334,6 +340,23 @@ describe('render', () => {
     renderer?.render(input);
 
     expect(fake.calls('uniform4fv')).toHaveLength(2);
+  });
+});
+describe('render: ракурс звёзд', () => {
+  it('передаёт шейдеру звёзд рыскание и наклон камеры', () => {
+    const fake = createFakeGl();
+    const { renderer } = createRenderer(fake);
+
+    renderer?.render({ ...createInputState(), viewYaw: 0.3, viewPitch: -0.2 });
+
+    expect(fake.calls('uniform2f').map((args) => args.slice(1))).toContainEqual([0.3, -0.2]);
+  });
+
+  it('по умолчанию ракурс нулевой', () => {
+    const input = createInputState();
+
+    expect(input.viewYaw).toBe(0);
+    expect(input.viewPitch).toBe(0);
   });
 });
 

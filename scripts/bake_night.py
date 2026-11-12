@@ -92,14 +92,14 @@ TARGETS = {
 FIGURES = list(TARGETS)  # порядок появления: Н2…Н5
 
 W, H = 1600, 900          # рабочий размер картинки при запекании, px
-# Параметры запекания: мелкие точки (0.75–2.3 px) с естественной вариацией радиуса
-# и распределением по полутонам (gamma = 0.85). Это даёт тонкую гравюрную текстуру
-# и мягкие переходы без слипания в сплошные белые пятна.
-R_MIN, R_MAX = 0.75, 2.3
-GAMMA = 0.85
-BLUR_PX = 0.4
+# Параметры запекания: мелкие точки (0.65–1.85 px) с чётким гравюрным шагом (pack = 1.00)
+# и проработкой полутонов (gamma = 0.92, val^1.45). Это даёт тонкую текстуру гравюры,
+# раздельные штрихи (спицы, складки, шерсть) и защиту от слипания в белые пятна при 3D-перспективе.
+R_MIN, R_MAX = 0.65, 1.85
+GAMMA = 0.92
+BLUR_PX = 0.35
 HIGHLIGHT_CUTOFF = 0.015  # мягкий порог для тонких штрихов и градиентов
-PACK = 0.96               # точки сохраняют раздельность и читаемость
+PACK = 1.00               # точки сохраняют раздельность и читаемость
 CELL = 8
 FIXED_POINT = 100         # int16 хранит сотые доли единицы ковша
 COUNTS = (3600, 1800)     # десктоп / телефон (как 3519 точек у бюста)
@@ -151,7 +151,7 @@ def scatter(d: np.ndarray, count: int, rng: np.random.Generator, radius_scale: f
             y, x = divmod(int(flat), W)
             px, py = x + rng.random(), y + rng.random()
             val = float(d[y, x])
-            r = (R_MIN + (R_MAX - R_MIN) * (val ** 1.3)) * (0.85 + 0.3 * rng.random()) * radius_scale
+            r = (R_MIN + (R_MAX - R_MIN) * (val ** 1.45)) * (0.86 + 0.28 * rng.random()) * radius_scale
             cx, cy = int(px // CELL), int(py // CELL)
             near = (p for i in (-1, 0, 1) for j in (-1, 0, 1) for p in grid.get((cx + i, cy + j), ()))
             if all((px - qx) ** 2 + (py - qy) ** 2 >= (PACK * (r + qr)) ** 2 for qx, qy, qr in near):
@@ -160,6 +160,20 @@ def scatter(d: np.ndarray, count: int, rng: np.random.Generator, radius_scale: f
                 if len(points) == count:
                     return np.array(points, dtype=np.float64)
     return np.array(points, dtype=np.float64)
+
+
+# Глубина звёзд ковша для 3D-камеры. Порядок — настоящий (по расстояниям из output/dipper/dipper-stars.json,
+# d = 3261.56 / параллакс[mas] св. лет): Мерак ближе всех, дальше Мегрец, Алиот, Мицар, Фекда, Алькаид, Дубхе.
+# Разброс сбалансирован: параллакс звёзд ковша и фоновых звёзд читается чётко, а перекос ракурса 20° не ломает
+# узнаваемость силуэтов и колёс.
+DIPPER_STARS_DATA = ROOT / "output/dipper/dipper-stars.json"
+DEPTH_BY_RANK = (-6.0, -3.5, 0.5, 2.0, 3.5, 10.0, 15.0)
+
+
+def star_depths() -> dict[str, float]:
+    data = json.loads(DIPPER_STARS_DATA.read_text(encoding="utf-8"))
+    by_distance = sorted(STARS, key=lambda k: 3261.56 / data[k]["plx_mas"])
+    return {name: DEPTH_BY_RANK[rank] for rank, name in enumerate(by_distance)}
 
 
 def bounds_of(points: np.ndarray) -> dict[str, float]:
@@ -236,7 +250,7 @@ def main() -> None:
     union = np.concatenate(baked[COUNTS[0]])
     manifest = {
         "fixedPoint": FIXED_POINT,
-        "stars": [{"name": k, "x": v[0], "y": v[1]} for k, v in STARS.items()],
+        "stars": [{"name": k, "x": v[0], "y": v[1], "z": star_depths()[k]} for k, v in STARS.items()],
         "figures": FIGURES,
         "counts": list(COUNTS),
         # Общие границы всех фигур в единицах ковша: по ним сцена выбирает масштаб на экране.

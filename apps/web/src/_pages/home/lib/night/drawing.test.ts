@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_DRAWING, findStarAt, MAX_SEGMENTS, pressStar, releaseAnchor } from './drawing';
 import type { Drawing } from './drawing';
 
-const IDENTITY = { originX: 0, originY: 0, scale: 1 };
 
 describe('pressStar', () => {
   it('первое нажатие делает звезду якорем', () => {
@@ -52,24 +51,28 @@ describe('releaseAnchor', () => {
   });
 });
 
+/** Экранные положения трёх звёзд (px). */
+const STARS = [
+  { x: 100, y: 100 },
+  { x: 150, y: 100 },
+  { x: 400, y: 300 },
+];
+
 describe('findStarAt', () => {
   it('находит звезду в радиусе попадания', () => {
-    // Дубхе стоит в (1, 0)
-    expect(findStarAt(IDENTITY, { point: { x: 3, y: 1 }, radiusPx: 5 })).toBe(0);
+    expect(findStarAt(STARS, { point: { x: 103, y: 101 }, radiusPx: 5 })).toBe(0);
   });
 
   it('возвращает null вне радиуса', () => {
-    expect(findStarAt(IDENTITY, { point: { x: 500, y: 500 }, radiusPx: 24 })).toBeNull();
+    expect(findStarAt(STARS, { point: { x: 700, y: 700 }, radiusPx: 24 })).toBeNull();
   });
 
   it('выбирает ближайшую из двух звёзд', () => {
-    // Дубхе (1, 0) в 15 px, Мерак (0, 22) в 7 px — обе в радиусе 24
-    expect(findStarAt(IDENTITY, { point: { x: 0, y: 15 }, radiusPx: 24 })).toBe(1);
+    // до звезды 0 — 40 px, до звезды 1 — 10 px; обе в радиусе 50
+    expect(findStarAt(STARS, { point: { x: 140, y: 100 }, radiusPx: 50 })).toBe(1);
   });
 
-  it('учитывает масштаб и смещение раскладки', () => {
-    // Мерак (0, 22) при смещении (100, 50) и масштабе 2 стоит в (100, 94)
-    const layout = { originX: 100, originY: 50, scale: 2 };
-    expect(findStarAt(layout, { point: { x: 101, y: 95 }, radiusPx: 4 })).toBe(1);
+  it('без звёзд возвращает null', () => {
+    expect(findStarAt([], { point: { x: 0, y: 0 }, radiusPx: 50 })).toBeNull();
   });
 });
