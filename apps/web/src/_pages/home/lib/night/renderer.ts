@@ -93,7 +93,11 @@ function compile(gl: WebGL2RenderingContext, type: GLenum, source: string): WebG
   return shader;
 }
 
-function createPass(gl: WebGL2RenderingContext, sources: readonly [string, string], names: readonly string[]): Pass {
+function createPass(
+  gl: WebGL2RenderingContext,
+  sources: readonly [string, string],
+  names: readonly string[],
+): Pass {
   const program = gl.createProgram();
   const vao = gl.createVertexArray();
   gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, sources[0]));
@@ -106,7 +110,11 @@ function createPass(gl: WebGL2RenderingContext, sources: readonly [string, strin
   return { program, vao, u };
 }
 
-function bindCorners(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, corners: Float32Array): WebGLBuffer {
+function bindCorners(
+  gl: WebGL2RenderingContext,
+  vao: WebGLVertexArrayObject,
+  corners: Float32Array,
+): WebGLBuffer {
   const buffer = gl.createBuffer();
   gl.bindVertexArray(vao);
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -117,7 +125,11 @@ function bindCorners(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, co
 }
 
 /** Таблица звёзд: на экземпляр aPos (2 float), aLook (3 float) и aTint (2 float), см. STAR_STRIDE. */
-function bindStars(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, stars: Float32Array): WebGLBuffer {
+function bindStars(
+  gl: WebGL2RenderingContext,
+  vao: WebGLVertexArrayObject,
+  stars: Float32Array,
+): WebGLBuffer {
   const buffer = gl.createBuffer();
   const stride = STAR_STRIDE * Float32Array.BYTES_PER_ELEMENT;
   gl.bindVertexArray(vao);
@@ -137,8 +149,16 @@ function bindStars(gl: WebGL2RenderingContext, vao: WebGLVertexArrayObject, star
 
 const VIEW_UNIFORMS = ['uView'] as const;
 
-export function createNightRenderer(canvas: HTMLCanvasElement, options: RendererOptions): NightRenderer | null {
-  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false });
+export function createNightRenderer(
+  canvas: HTMLCanvasElement,
+  options: RendererOptions,
+): NightRenderer | null {
+  const gl = canvas.getContext('webgl2', {
+    alpha: true,
+    premultipliedAlpha: true,
+    antialias: false,
+    depth: false,
+  });
   if (!gl) return null;
   try {
     return new WebglNightRenderer(gl, canvas, options);
@@ -165,18 +185,30 @@ class WebglNightRenderer implements NightRenderer {
     private readonly canvas: HTMLCanvasElement,
     options: RendererOptions,
   ) {
-    this.ink = createPass(gl, [INK_VERTEX, inkFragment(CELL_PX, SLOTS, MAX_CURSOR_DOTS)], [
-      'uGrid',
-      'uGridSize',
-      'uDpr',
-      'uViewHeight',
-      'uCursorCount',
-      'uCursorDots',
-      'uCursorDir',
-      'uCursorBBox',
-    ]);
-    this.lines = createPass(gl, [LINE_VERTEX, LINE_FRAGMENT], [...VIEW_UNIFORMS, 'uSegments', 'uOutlineCount', 'uAlpha', 'uWidth']);
-    this.stars = createPass(gl, [STAR_VERTEX, STAR_FRAGMENT], [...VIEW_UNIFORMS, 'uAlpha', 'uTime', 'uViewAngle']);
+    this.ink = createPass(
+      gl,
+      [INK_VERTEX, inkFragment(CELL_PX, SLOTS, MAX_CURSOR_DOTS)],
+      [
+        'uGrid',
+        'uGridSize',
+        'uDpr',
+        'uViewHeight',
+        'uCursorCount',
+        'uCursorDots',
+        'uCursorDir',
+        'uCursorBBox',
+      ],
+    );
+    this.lines = createPass(
+      gl,
+      [LINE_VERTEX, LINE_FRAGMENT],
+      [...VIEW_UNIFORMS, 'uSegments', 'uOutlineCount', 'uAlpha', 'uWidth'],
+    );
+    this.stars = createPass(
+      gl,
+      [STAR_VERTEX, STAR_FRAGMENT],
+      [...VIEW_UNIFORMS, 'uAlpha', 'uTime', 'uViewAngle'],
+    );
     this.starBuffer = bindStars(gl, this.stars.vao, options.stars);
     this.buffers = [
       bindCorners(gl, this.ink.vao, QUAD),
@@ -223,7 +255,17 @@ class WebglNightRenderer implements NightRenderer {
     if (grid.width !== this.textureWidth || grid.textureHeight !== this.textureHeight) {
       this.textureWidth = grid.width;
       this.textureHeight = grid.textureHeight;
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, grid.width, grid.textureHeight, 0, gl.RGBA, gl.FLOAT, grid.data);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA32F,
+        grid.width,
+        grid.textureHeight,
+        0,
+        gl.RGBA,
+        gl.FLOAT,
+        grid.data,
+      );
       gl.useProgram(this.ink.program);
       gl.uniform2i(this.ink.u.uGridSize ?? null, grid.width, grid.height);
       return;

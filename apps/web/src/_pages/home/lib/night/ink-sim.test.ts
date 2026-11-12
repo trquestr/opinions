@@ -81,7 +81,8 @@ function dropsIn(grid: InkGrid): Dropped[] {
   const found: Dropped[] = [];
   for (let at = 0; at < grid.data.length; at += 4) {
     const r = grid.data[at + 2] ?? 0;
-    if (r > 0) found.push({ x: grid.data[at] ?? 0, y: grid.data[at + 1] ?? 0, r, stretch: grid.data[at + 3] ?? 0 });
+    if (r > 0)
+      found.push({ x: grid.data[at] ?? 0, y: grid.data[at + 1] ?? 0, r, stretch: grid.data[at + 3] ?? 0 });
   }
   return found;
 }
@@ -115,7 +116,12 @@ function retargeted(input: Partial<InkStep> = {}, options: SimOptions = {}) {
   const sim = createSim(options);
   const grid = createGrid();
   stepOn(sim, grid, { target: 0, nowMs: 0, ...input });
-  return { sim, grid, at: (nowMs: number, extra: Partial<InkStep> = {}) => stepOn(sim, grid, { target: 1, nowMs, ...input, ...extra }) };
+  return {
+    sim,
+    grid,
+    at: (nowMs: number, extra: Partial<InkStep> = {}) =>
+      stepOn(sim, grid, { target: 1, nowMs, ...input, ...extra }),
+  };
 }
 
 describe('InkSimulation: состояния', () => {
@@ -240,8 +246,12 @@ describe('InkSimulation: прямой переход к линиям зрите�
     const middle = at(T0 + 900)[0];
 
     // расстояние до прямой AB = |(M − A) × (B − A)| / |B − A|: только слабая турбулентность, не более 25 px
-    const cross = ((middle?.x ?? 0) - OLD_PLACE.x) * (NEW_PLACE.y - OLD_PLACE.y) - ((middle?.y ?? 0) - OLD_PLACE.y) * (NEW_PLACE.x - OLD_PLACE.x);
-    expect(Math.abs(cross) / Math.hypot(NEW_PLACE.x - OLD_PLACE.x, NEW_PLACE.y - OLD_PLACE.y)).toBeLessThan(25);
+    const cross =
+      ((middle?.x ?? 0) - OLD_PLACE.x) * (NEW_PLACE.y - OLD_PLACE.y) -
+      ((middle?.y ?? 0) - OLD_PLACE.y) * (NEW_PLACE.x - OLD_PLACE.x);
+    expect(Math.abs(cross) / Math.hypot(NEW_PLACE.x - OLD_PLACE.x, NEW_PLACE.y - OLD_PLACE.y)).toBeLessThan(
+      25,
+    );
     expect(distance(middle, OLD_PLACE)).toBeGreaterThan(1);
     expect(distance(middle, NEW_PLACE)).toBeGreaterThan(1);
   });
@@ -447,7 +457,11 @@ describe('InkSimulation: вздрагивание точно над каплей
   it('без анимации звезда ровно над каплей её не сдвигает', () => {
     const calm = stepOnce(createSim(), { isReducedMotion: true });
 
-    const same = stepOnce(createSim(), { isReducedMotion: true, hover: { x: 20, y: 10 }, hoverStrength: 0.5 });
+    const same = stepOnce(createSim(), {
+      isReducedMotion: true,
+      hover: { x: 20, y: 10 },
+      hoverStrength: 0.5,
+    });
 
     expect(same).toEqual(calm);
   });
@@ -509,7 +523,12 @@ describe('InkSimulation: объём дымки', () => {
 
   function depthRange(target: number): number {
     requestedDepths.length = 0;
-    const sim = new InkSimulation(COUNT, { center: CENTER, dipper: [FAR_STAR], bounds: BOUNDS, radiusScale: 1 });
+    const sim = new InkSimulation(COUNT, {
+      center: CENTER,
+      dipper: [FAR_STAR],
+      bounds: BOUNDS,
+      radiusScale: 1,
+    });
     sim.setState(0, SAME_PLACE);
     sim.setState(1, SAME_PLACE);
 

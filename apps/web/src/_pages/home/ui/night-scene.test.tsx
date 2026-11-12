@@ -43,7 +43,9 @@ describe('NightScene: сторона фигуры', () => {
   it('data-side стоит только у фраз с фигурой', () => {
     const { container } = render(<NightScene />);
 
-    const sides = [...container.querySelectorAll('[data-night-phrase]')].map((el) => el.getAttribute('data-side'));
+    const sides = [...container.querySelectorAll('[data-night-phrase]')].map((el) =>
+      el.getAttribute('data-side'),
+    );
 
     expect(sides).toEqual([null, 'right', 'left', 'right', 'left', null, null, null, null]);
   });

@@ -35,7 +35,10 @@ interface FieldConfig {
 export function fieldConfig(view: Size): FieldConfig {
   const { width, height } = view;
   const wordHeight = Math.max(1, Math.min(width * 0.12, (width - 40) / 7.02, height * 0.28, 134));
-  const dotScale = Math.max(0.5, Math.min(1.0, 0.45 + 0.55 * Math.max(0, (wordHeight - 35) / (134 - 35)) ** 0.85));
+  const dotScale = Math.max(
+    0.5,
+    Math.min(1.0, 0.45 + 0.55 * Math.max(0, (wordHeight - 35) / (134 - 35)) ** 0.85),
+  );
   const soft = Math.max(0.7, dotScale);
   return {
     maxRadius: Math.max(6, Math.round(12 * dotScale)),
@@ -129,7 +132,8 @@ function poissonDisk(view: Size, minDist: number, random: () => number): { xs: n
     }
     return true;
   };
-  const isOnScreen = (x: number, y: number) => x >= -PAD && x <= view.width + PAD && y >= -PAD && y <= view.height + PAD;
+  const isOnScreen = (x: number, y: number) =>
+    x >= -PAD && x <= view.width + PAD && y >= -PAD && y <= view.height + PAD;
   /** До 20 попыток поставить точку в кольце [minDist, 1.95·minDist] вокруг точки p. */
   const placeNear = (p: number): boolean => {
     for (let k = 0; k < 20; k++) {
@@ -258,11 +262,15 @@ export class CursorField {
     const y0 = Math.max(0, Math.floor((cy - r + PAD) / BIN));
     const y1 = Math.min(this.binRows - 1, Math.floor((cy + r + PAD) / BIN));
     for (let by = y0; by <= y1; by++) {
-      for (let bx = x0; bx <= x1; bx++) this.activateBin(this.bins[by * this.binCols + bx] ?? [], { cx, cy, r });
+      for (let bx = x0; bx <= x1; bx++)
+        this.activateBin(this.bins[by * this.binCols + bx] ?? [], { cx, cy, r });
     }
   }
 
-  private activateBin(bin: readonly number[], around: { readonly cx: number; readonly cy: number; readonly r: number }): void {
+  private activateBin(
+    bin: readonly number[],
+    around: { readonly cx: number; readonly cy: number; readonly r: number },
+  ): void {
     for (const i of bin) {
       if (this.fin[i]) continue;
       const dx = (this.fx[i] ?? 0) - around.cx;
@@ -325,7 +333,8 @@ export class CursorField {
     const e = Math.min(1, (this.fe[i] ?? 0) + (1 - (this.fe[i] ?? 0)) * (1 - (1 - emerge) ** s));
     this.fe[i] = e;
     const minR = Math.max(0.8, config.maxRadius * 0.15);
-    this.ft[i] = (minR + (config.maxRadius - minR) * proximity ** 1.25) * sf * (e + Math.sin(e * Math.PI) * 0.2);
+    this.ft[i] =
+      (minR + (config.maxRadius - minR) * proximity ** 1.25) * sf * (e + Math.sin(e * Math.PI) * 0.2);
     if (pointer.speed <= 0.4) return;
     target.x = this.shiftX * proximity;
     target.y = this.shiftY * proximity;
@@ -375,7 +384,10 @@ export class CursorField {
   /** Капля на фронте волны раздувается до 0.9 от наибольшего размера (с запасом по пульсу). */
   private boostOnWave(i: number, pulse: number): void {
     const minR = Math.max(0.8, this.config.maxRadius * 0.15);
-    const boost = (minR + (this.config.maxRadius - minR) * 0.9) * (this.fsf[i] ?? 1) * (0.65 + pulse * 0.85 * CLICK_POWER);
+    const boost =
+      (minR + (this.config.maxRadius - minR) * 0.9) *
+      (this.fsf[i] ?? 1) *
+      (0.65 + pulse * 0.85 * CLICK_POWER);
     if (boost > (this.ft[i] ?? 0)) this.ft[i] = boost;
   }
 

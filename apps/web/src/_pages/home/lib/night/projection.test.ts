@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import manifest from './night-manifest.json';
-import { createSkyDirections, depthAt, DIPPER_DEPTHS, focalLength, FOV_DEGREES, Projector } from './projection';
+import {
+  createSkyDirections,
+  depthAt,
+  DIPPER_DEPTHS,
+  focalLength,
+  FOV_DEGREES,
+  Projector,
+} from './projection';
 import type { CameraPose, Projected } from './projection';
 
 const POSE: CameraPose = {
@@ -133,7 +140,10 @@ describe('Projector.projectSky', () => {
     const direction = { x: 0.1, y: 0.05, z: 0.99 };
     const still = createProjector().projectSky(direction, emptyResult());
 
-    const moved = createProjector({ targetX: 500, targetZ: 300, distance: 40 }).projectSky(direction, emptyResult());
+    const moved = createProjector({ targetX: 500, targetZ: 300, distance: 40 }).projectSky(
+      direction,
+      emptyResult(),
+    );
 
     expect(moved.x).toBeCloseTo(still.x, 8);
     expect(moved.y).toBeCloseTo(still.y, 8);
@@ -165,11 +175,14 @@ describe('глубина ковша', () => {
     expect(DIPPER_DEPTHS).toEqual(manifest.stars.map((star) => star.z));
   });
 
-  it.each(manifest.stars.map((star, index) => [star.name, index] as const))('у звезды %s глубина близка к её z', (_, index) => {
-    const star = manifest.stars[index];
+  it.each(manifest.stars.map((star, index) => [star.name, index] as const))(
+    'у звезды %s глубина близка к её z',
+    (_, index) => {
+      const star = manifest.stars[index];
 
-    expect(Math.abs(depthAt(star?.x ?? 0, star?.y ?? 0) - (star?.z ?? 0))).toBeLessThan(4);
-  });
+      expect(Math.abs(depthAt(star?.x ?? 0, star?.y ?? 0) - (star?.z ?? 0))).toBeLessThan(4);
+    },
+  );
 
   it('между звёздами глубина лежит между наименьшей и наибольшей', () => {
     const zs = manifest.stars.map((star) => star.z);
@@ -202,7 +215,9 @@ describe('createSkyDirections', () => {
   it('каждое направление единичной длины и смотрит вперёд', () => {
     const sky = createSkyDirections(50);
 
-    const lengths = Array.from({ length: 50 }, (_, i) => Math.hypot(sky[i * 3] ?? 0, sky[i * 3 + 1] ?? 0, sky[i * 3 + 2] ?? 0));
+    const lengths = Array.from({ length: 50 }, (_, i) =>
+      Math.hypot(sky[i * 3] ?? 0, sky[i * 3 + 1] ?? 0, sky[i * 3 + 2] ?? 0),
+    );
     const depths = Array.from({ length: 50 }, (_, i) => sky[i * 3 + 2] ?? 0);
 
     expect(lengths.every((length) => Math.abs(length - 1) < 1e-5)).toBe(true);

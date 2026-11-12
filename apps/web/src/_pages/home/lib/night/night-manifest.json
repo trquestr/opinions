@@ -44,16 +44,8 @@
       "z": 10.0
     }
   ],
-  "figures": [
-    "bear",
-    "plough",
-    "chariot",
-    "procession"
-  ],
-  "counts": [
-    3600,
-    1800
-  ],
+  "figures": ["bear", "plough", "chariot", "procession"],
+  "counts": [3600, 1800],
   "bounds": {
     "minX": -31.3,
     "minY": -19.4,

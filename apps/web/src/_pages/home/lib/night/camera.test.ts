@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { Camera, CAMERA_MS, figureAnchor, figureBounds, figureShot, figureSide, figureYaw, overviewShot } from './camera';
+import {
+  Camera,
+  CAMERA_MS,
+  figureAnchor,
+  figureBounds,
+  figureShot,
+  figureSide,
+  figureYaw,
+  overviewShot,
+} from './camera';
 import manifest from './night-manifest.json';
 import { Projector } from './projection';
 import type { Shot } from './camera';
@@ -86,7 +95,11 @@ describe('figureShot', () => {
   });
 
   it('высокая рамка ограничена 66% высоты экрана', () => {
-    const shot = figureShot(input, { state: 1, bounds: { minX: 0, minY: 0, maxX: 100, maxY: 200 }, side: 'left' });
+    const shot = figureShot(input, {
+      state: 1,
+      bounds: { minX: 0, minY: 0, maxX: 100, maxY: 200 },
+      side: 'left',
+    });
 
     // s = 594 / 200 = 2,97; D = 1000 / 2,97
     expect(shot.pose.distance).toBeCloseTo(336.7, 1);
@@ -109,7 +122,11 @@ describe('sway у кадров', () => {
 
   it('общий план качается, кадр фигуры — нет', () => {
     const overview = overviewShot(input, { originX: 0, originY: 0, scale: 5 });
-    const figure = figureShot(input, { state: 1, bounds: { minX: 0, minY: 0, maxX: 100, maxY: 50 }, side: 'left' });
+    const figure = figureShot(input, {
+      state: 1,
+      bounds: { minX: 0, minY: 0, maxX: 100, maxY: 50 },
+      side: 'left',
+    });
 
     expect(overview.sway).toBe(1);
     expect(figure.sway).toBe(0);
@@ -170,7 +187,16 @@ const START: Shot = {
 const TARGET: Shot = {
   key: 2,
   sway: 0,
-  pose: { yaw: 0.4, pitch: 0.2, distance: 200, targetX: 10, targetY: 20, targetZ: 0, anchorX: 1000, anchorY: 500 },
+  pose: {
+    yaw: 0.4,
+    pitch: 0.2,
+    distance: 200,
+    targetX: 10,
+    targetY: 20,
+    targetZ: 0,
+    anchorX: 1000,
+    anchorY: 500,
+  },
 };
 const T0 = 1000;
 const HOLD_MS = 8000;
@@ -252,7 +278,7 @@ describe('Camera', () => {
     const isMoving = camera.update(T0 + CAMERA_MS + HOLD_MS / 2);
 
     // h = smoothstep(0,5) = 0,5: D = 200 / 1,0175; ψ = 0,4 + 0,03
-    expect(camera.current.distance).toBeCloseTo(196.560, 2);
+    expect(camera.current.distance).toBeCloseTo(196.56, 2);
     expect(camera.current.yaw).toBeCloseTo(0.43, 8);
     expect(isMoving).toBe(true);
   });

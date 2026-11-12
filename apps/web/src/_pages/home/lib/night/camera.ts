@@ -103,12 +103,18 @@ export function overviewShot(input: ShotInput, overview: Layout): Shot {
 }
 
 /** Кадр фигуры: под своим углом, сбоку экрана. */
-export function figureShot(input: ShotInput, figure: { readonly state: number; readonly bounds: Bounds; readonly side: Side }): Shot {
+export function figureShot(
+  input: ShotInput,
+  figure: { readonly state: number; readonly bounds: Bounds; readonly side: Side },
+): Shot {
   const { view, focal, key } = input;
   const { bounds } = figure;
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
-  const scale = Math.min((view.width * FIGURE_WIDTH_SHARE) / width, (view.height * FIGURE_HEIGHT_SHARE) / height);
+  const scale = Math.min(
+    (view.width * FIGURE_WIDTH_SHARE) / width,
+    (view.height * FIGURE_HEIGHT_SHARE) / height,
+  );
   const anchor = figureAnchor(view, figure.side);
   const yaw = figureYaw(figure.side);
   return {
@@ -136,7 +142,16 @@ function smoothstep(x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-const POSE_KEYS = ['yaw', 'pitch', 'distance', 'targetX', 'targetY', 'targetZ', 'anchorX', 'anchorY'] as const;
+const POSE_KEYS = [
+  'yaw',
+  'pitch',
+  'distance',
+  'targetX',
+  'targetY',
+  'targetZ',
+  'anchorX',
+  'anchorY',
+] as const;
 
 function emptyPose(): CameraPose {
   return { yaw: 0, pitch: 0, distance: 1, targetX: 0, targetY: 0, targetZ: 0, anchorX: 0, anchorY: 0 };
@@ -208,7 +223,8 @@ export class Camera {
     for (const key of POSE_KEYS) this.base[key] = lerp(this.from[key], this.to[key], e);
     copyPose(this.current, this.base);
     const hold = isStill ? 0 : this.holdAt(nowMs);
-    this.current.distance = this.base.distance / ((1 - ARC_PULL_BACK * Math.sin(Math.PI * e)) * (1 + HOLD_PUSH_IN * hold));
+    this.current.distance =
+      this.base.distance / ((1 - ARC_PULL_BACK * Math.sin(Math.PI * e)) * (1 + HOLD_PUSH_IN * hold));
     this.current.yaw = this.base.yaw + HOLD_ORBIT_RADIANS * hold;
     this.sway = lerp(this.fromSway, this.toSway, e);
     const isSwaying = !isStill && this.sway > 0;

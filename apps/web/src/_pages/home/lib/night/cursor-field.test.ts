@@ -151,8 +151,12 @@ describe('CursorField: прорастание у курсора', () => {
 
     const dots = readDots(field);
 
-    expect(dots.every((d) => d.x - d.r >= (field.bbox[0] ?? 0) && d.y - d.r >= (field.bbox[1] ?? 0))).toBe(true);
-    expect(dots.every((d) => d.x + d.r <= (field.bbox[2] ?? 0) && d.y + d.r <= (field.bbox[3] ?? 0))).toBe(true);
+    expect(dots.every((d) => d.x - d.r >= (field.bbox[0] ?? 0) && d.y - d.r >= (field.bbox[1] ?? 0))).toBe(
+      true,
+    );
+    expect(dots.every((d) => d.x + d.r <= (field.bbox[2] ?? 0) && d.y + d.r <= (field.bbox[3] ?? 0))).toBe(
+      true,
+    );
   });
 });
 
@@ -217,7 +221,9 @@ describe('CursorField: предел капель', () => {
   it('не передаёт шейдеру больше 256 капель', () => {
     const big = { width: 1440, height: 900 };
     const field = createField(big);
-    Array.from({ length: 150 }, (_, k) => k).forEach((k) => field.click(60 + (k % 15) * 90, 60 + Math.floor(k / 15) * 85));
+    Array.from({ length: 150 }, (_, k) => k).forEach((k) =>
+      field.click(60 + (k % 15) * 90, 60 + Math.floor(k / 15) * 85),
+    );
 
     field.step(30);
 

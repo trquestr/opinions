@@ -43,7 +43,11 @@ export function createHaze(count: number): Int16Array {
   const points = Array.from({ length: count }, () => {
     const a = random() * Math.PI * 2;
     const d = 0.45 * Math.sqrt(-2 * Math.log(1 - 0.98 * random()));
-    return { x: cx + Math.cos(a) * d * rx, y: cy + Math.sin(a) * d * ry, r: random() < HAZE_VISIBLE_SHARE ? 0.06 + 0.1 * random() : 0 };
+    return {
+      x: cx + Math.cos(a) * d * rx,
+      y: cy + Math.sin(a) * d * ry,
+      r: random() < HAZE_VISIBLE_SHARE ? 0.06 + 0.1 * random() : 0,
+    };
   });
   return encode(points);
 }
@@ -99,7 +103,9 @@ export function pickInkCount(isSmallScreen: boolean): number {
 /** Загружает запечённые фигуры. Файл проверяется по размеру: битый или чужой — ошибка, сцена останется в дымке. */
 export async function loadFigures(count: number, signal: AbortSignal): Promise<Int16Array[]> {
   const url = `/assets/night/points-${count}.bin`;
-  const response = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(LOAD_TIMEOUT_MS)]) });
+  const response = await fetch(url, {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(LOAD_TIMEOUT_MS)]),
+  });
   if (!response.ok) throw new Error(`Фигуры ночи не загрузились: ${url} → ${response.status}`);
   const buffer = await response.arrayBuffer();
   const values = count * INK_STRIDE;
@@ -107,5 +113,7 @@ export async function loadFigures(count: number, signal: AbortSignal): Promise<I
   if (buffer.byteLength !== expected) {
     throw new Error(`Фигуры ночи: ${url} — ${buffer.byteLength} байт вместо ${expected}`);
   }
-  return manifest.figures.map((_, i) => new Int16Array(buffer, i * values * Int16Array.BYTES_PER_ELEMENT, values));
+  return manifest.figures.map(
+    (_, i) => new Int16Array(buffer, i * values * Int16Array.BYTES_PER_ELEMENT, values),
+  );
 }

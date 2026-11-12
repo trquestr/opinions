@@ -9,7 +9,13 @@ export function findNightElements(root: HTMLElement | null): NightElements | nul
   const canvas = root?.querySelector<HTMLCanvasElement>('canvas[data-night-canvas]');
   const epilogue = root?.querySelector<HTMLElement>('[data-night-epilogue]');
   if (!root || !stage || !canvas || !epilogue) return null;
-  return { root, stage, canvas, epilogue, phrases: [...root.querySelectorAll<HTMLElement>('[data-night-phrase]')] };
+  return {
+    root,
+    stage,
+    canvas,
+    epilogue,
+    phrases: [...root.querySelectorAll<HTMLElement>('[data-night-phrase]')],
+  };
 }
 
 /*

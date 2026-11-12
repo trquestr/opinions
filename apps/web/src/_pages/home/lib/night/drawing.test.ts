@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_DRAWING, findStarAt, MAX_SEGMENTS, pressStar, releaseAnchor } from './drawing';
 import type { Drawing } from './drawing';
 
-
 describe('pressStar', () => {
   it('первое нажатие делает звезду якорем', () => {
     expect(pressStar(EMPTY_DRAWING, 2)).toEqual({ segments: [], anchor: 2 });

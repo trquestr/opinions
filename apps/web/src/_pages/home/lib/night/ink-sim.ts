@@ -211,16 +211,25 @@ export class InkSimulation {
     this.states[index] = data;
     let maxRadius = 1;
     for (let at = 2; at < data.length; at += INK_STRIDE) maxRadius = Math.max(maxRadius, data[at] ?? 0);
-    const volume = Float32Array.from({ length: this.count }, (_, i) => this.volumeOf({ index, data, i, maxRadius }));
+    const volume = Float32Array.from({ length: this.count }, (_, i) =>
+      this.volumeOf({ index, data, i, maxRadius }),
+    );
     this.depths[index] = Float32Array.from(volume, (d, i) => {
       const at = i * INK_STRIDE;
-      return depthAt((data[at] ?? 0) / FIXED_POINT, (data[at + 1] ?? 0) / FIXED_POINT) + d * Math.cos(heroYaw);
+      return (
+        depthAt((data[at] ?? 0) / FIXED_POINT, (data[at + 1] ?? 0) / FIXED_POINT) + d * Math.cos(heroYaw)
+      );
     });
     this.shifts[index] = Float32Array.from(volume, (d) => d * Math.sin(heroYaw));
   }
 
   /** Смещение капли сверх листа вдоль линии взгляда (см. setState). */
-  private volumeOf(drop: { readonly index: number; readonly data: Int16Array; readonly i: number; readonly maxRadius: number }): number {
+  private volumeOf(drop: {
+    readonly index: number;
+    readonly data: Int16Array;
+    readonly i: number;
+    readonly maxRadius: number;
+  }): number {
     const { index, data, i } = drop;
     if (index === HAZE_STATE) return ((this.seedA[i] ?? 0.5) * 2 - 1) * HAZE_DEPTH;
     const relief = -RELIEF * ((data[i * INK_STRIDE + 2] ?? 0) / drop.maxRadius);

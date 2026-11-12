@@ -33,8 +33,15 @@ function focusScale(projector: Projector): number {
 }
 
 /** Строки таблицы [from, to): значение поля offset у каждой. */
-function column(field: StarField, rows: { readonly from: number; readonly to: number }, offset: number): number[] {
-  return Array.from({ length: rows.to - rows.from }, (_, i) => field.table[(rows.from + i) * STAR_STRIDE + offset] ?? 0);
+function column(
+  field: StarField,
+  rows: { readonly from: number; readonly to: number },
+  offset: number,
+): number[] {
+  return Array.from(
+    { length: rows.to - rows.from },
+    (_, i) => field.table[(rows.from + i) * STAR_STRIDE + offset] ?? 0,
+  );
 }
 
 function mean(values: readonly number[]): number {
@@ -63,7 +70,10 @@ describe('StarField: состав', () => {
     const points = field.drawablePoints();
 
     expect(points).toHaveLength(14);
-    expect(points[0]).toEqual({ x: field.table[dipperFirst * STAR_STRIDE], y: field.table[dipperFirst * STAR_STRIDE + 1] });
+    expect(points[0]).toEqual({
+      x: field.table[dipperFirst * STAR_STRIDE],
+      y: field.table[dipperFirst * STAR_STRIDE + 1],
+    });
     expect(points[7]).toEqual({
       x: field.table[(dipperFirst + 7) * STAR_STRIDE],
       y: field.table[(dipperFirst + 7) * STAR_STRIDE + 1],
