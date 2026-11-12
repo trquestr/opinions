@@ -69,6 +69,10 @@
     uniform float u_dpr;
     uniform float u_strokeR;
     uniform float u_scrollY;
+    uniform float u_zoomScale;
+    uniform vec2 u_zoomOrigin;
+    uniform vec2 u_zoomTranslate;
+    uniform float u_wordmarkOpacity;
 
     // Капли и постепенно вытекающие из них штрихи (1 капля = 1 уникальный участок буквы)
     uniform int u_dropCount;
@@ -127,7 +131,9 @@
 
     void main() {
       vec2 p = vec2(gl_FragCoord.x / u_dpr, u_res.y - gl_FragCoord.y / u_dpr);
-      vec2 pText = vec2(p.x, p.y + u_scrollY);
+      float zScale = max(0.001, u_zoomScale);
+      vec2 pZoom = (p - u_zoomTranslate - u_zoomOrigin) / zScale + u_zoomOrigin;
+      vec2 pText = vec2(pZoom.x, pZoom.y + u_scrollY);
       float aa = 0.7 / u_dpr;
 
       // dCores объединяет сами круглые капли друг с другом через жидкий метаболл smin,
@@ -205,10 +211,13 @@
         }
       }
 
+      float dTextScreen = dText * zScale;
       float kGoo = max(0.0, min(6.5, rCursor * 1.3));
-      float d = smin(dText, dCursor, kGoo);
+      float d = smin(dTextScreen, dCursor, kGoo);
 
-      float ink = 1.0 - smoothstep(-aa, aa, d);
+      // Масштабируем расстояние на экране, чтобы край штриха всегда оставался
+      // идеально чётким нативным векторным контуром с субпиксельным антиалиасингом (aa = 0.7px)
+      float ink = (1.0 - smoothstep(-aa, aa, d)) * u_wordmarkOpacity;
       outColor = vec4(0.0, 0.0, 0.0, ink);
     }
   `;
@@ -270,6 +279,33 @@
   const uCursorDots = gl.getUniformLocation(prog, 'u_cursorDots');
   const uCursorDir = gl.getUniformLocation(prog, 'u_cursorDir');
   const uCursorBBox = gl.getUniformLocation(prog, 'u_cursorBBox');
+
+  const uZoomScale = gl.getUniformLocation(prog, 'u_zoomScale');
+  const uZoomOrigin = gl.getUniformLocation(prog, 'u_zoomOrigin');
+  const uZoomTranslate = gl.getUniformLocation(prog, 'u_zoomTranslate');
+  const uWordmarkOpacity = gl.getUniformLocation(prog, 'u_wordmarkOpacity');
+
+  let currentZoomScale = 1.0;
+  let currentZoomOriginX = 0.0;
+  let currentZoomOriginY = 0.0;
+  let currentZoomTranslateX = 0.0;
+  let currentZoomTranslateY = 0.0;
+  let currentWordmarkOpacity = 1.0;
+
+  window.__setWordmarkCameraZoom = (params) => {
+    if (!params) return;
+    currentZoomScale = params.scale || 1.0;
+    currentZoomOriginX = params.originX || 0.0;
+    currentZoomOriginY = params.originY || 0.0;
+    currentZoomTranslateX = params.translateX || 0.0;
+    currentZoomTranslateY = params.translateY || 0.0;
+    currentWordmarkOpacity = params.opacity !== undefined ? params.opacity : 1.0;
+    scheduleRender();
+  };
+  if (window.__pendingWordmarkZoom) {
+    window.__setWordmarkCameraZoom(window.__pendingWordmarkZoom);
+    window.__pendingWordmarkZoom = null;
+  }
 
   const dropCoreData = new Float32Array(MAX_DROPS * 4);
   const dropSegData = new Float32Array(MAX_DROPS * 4);
@@ -1660,7 +1696,13 @@
       }
     }
 
-    gl.uniform1f(uScrollY, window.scrollY || window.pageYOffset || 0);
+    // Вордмарк всегда остаётся на своей канонической позиции; зум в чашу буквы U делает сцена «Облака» через CSS-матрицу
+    gl.uniform1f(uScrollY, 0);
+
+    gl.uniform1f(uZoomScale, currentZoomScale);
+    gl.uniform2f(uZoomOrigin, currentZoomOriginX, currentZoomOriginY);
+    gl.uniform2f(uZoomTranslate, currentZoomTranslateX, currentZoomTranslateY);
+    gl.uniform1f(uWordmarkOpacity, currentWordmarkOpacity);
 
     gl.uniform1i(uCursorCount, cursorSendCount);
     if (cursorSendCount > 0) {

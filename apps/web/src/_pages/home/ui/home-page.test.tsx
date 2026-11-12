@@ -3,8 +3,10 @@ import { cleanup, render } from '@testing-library/react';
 
 // Загрузчик скриптов в этом тесте не нужен — проверяется разметка.
 vi.mock('./landing-scripts', () => ({ LandingScripts: () => null }));
-// Драйвер ночной сцены (WebGL) тоже клиентский — здесь проверяется только разметка.
+// Драйверы сцен (WebGL) тоже клиентские — здесь проверяется только разметка.
+vi.mock('./clouds-scene-driver', () => ({ CloudsSceneDriver: () => null }));
 vi.mock('./night-scene-driver', () => ({ NightSceneDriver: () => null }));
+vi.mock('./smooth-scroll-driver', () => ({ SmoothScrollDriver: () => null }));
 
 import { HomePage } from './home-page';
 
@@ -25,8 +27,9 @@ describe('HomePage', () => {
     }
   });
 
-  it('рендерит секцию ночной сцены #night', () => {
+  it('рендерит секцию ночной сцены #night и облаков #clouds', () => {
     const { container } = render(<HomePage />);
+    expect(container.querySelector('section#clouds')).not.toBeNull();
     expect(container.querySelector('section#night')).not.toBeNull();
   });
 });

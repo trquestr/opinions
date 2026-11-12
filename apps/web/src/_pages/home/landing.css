@@ -15,7 +15,7 @@ body {
   min-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   background: #ffffff;
   color: #000000;
   font-family:
@@ -28,7 +28,8 @@ body {
 }
 
 .hero {
-  position: relative;
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100vh;
   height: 100dvh;
@@ -36,6 +37,8 @@ body {
   display: grid;
   place-items: center;
   touch-action: none;
+  pointer-events: none;
+  z-index: 40;
 }
 
 .cloud-relief-canvas {
@@ -178,7 +181,8 @@ body {
   color: #ecece8;
 }
 
-.night-phrase {
+.night-phrase,
+.clouds-phrase {
   font-family: Georgia, 'Times New Roman', serif;
   font-weight: 400;
   letter-spacing: 0.01em;
