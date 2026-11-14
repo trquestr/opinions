@@ -1,3 +1,4 @@
+import { skyLanding } from '../sky-landing';
 import {
   EMPTY_DRAWING,
   FINISH_IDLE_MS,
@@ -12,6 +13,7 @@ import {
   figureBounds,
   figureShot,
   figureSide,
+  figureSkyTurn,
   figureYaw,
   overviewShot,
   SIDE_LAYOUT_QUERY,
@@ -23,6 +25,7 @@ import { DetailsLayer } from './details-layer';
 import { createHaze, createOutline, loadFigures, pickInkCount } from './ink';
 import { InkGrid } from './ink-grid';
 import { InkSimulation } from './ink-sim';
+import { OverviewSky } from './overview-sky';
 import { computeLayout } from './layout';
 import { Projector, SKY_FOLLOW } from './projection';
 import { createInputState, createNightRenderer, MAX_LINE_SEGMENTS } from './renderer';
@@ -65,6 +68,11 @@ const STAR_CAPTURE_RADIUS_PX = 70;
 const STAR_RELEASE_RADIUS_PX = 85;
 const SMALL_SCREEN_QUERY = '(max-width: 767px), (pointer: coarse)';
 /**
+ * Доля сдвига неба, которую проходят гравюры за ход камеры: они висят будто дальше звёзд и едут короче
+ * (полный путь неба для них слишком длинный — решение владельца 2026-11-14).
+ */
+const DETAIL_TRAVEL = 0.35;
+/**
  * Ракурс за курсором (владелец 2026-11-12: «эффект присутствия объёма»). Курсор в долях экрана n ∈ [−1, 1]:
  * цель ψ = −n_x·3°, θ = −n_y·1.8° (было 4° и 2.5° — владелец: «всё сильно поехало») — ведёшь мышь вправо, видишь сцену чуть справа (как будто сдвинул голову).
  * Поворот догоняет цель экспоненциально: L += (L* − L)·(1 − 0.94^s), s — кадр в долях 60 Гц.
@@ -74,6 +82,11 @@ const LOOK_YAW = (3 * Math.PI) / 180;
 const LOOK_PITCH = (1.8 * Math.PI) / 180;
 const LOOK_EASE = 0.06;
 const LOOK_EPSILON = 1e-4;
+/** Капля-двойник на звезде (посадка капель дня) мельче этого радиуса не рисуется. */
+const LANDED_MIN_VISIBLE_PX = 0.3;
+/** Вылет пыли из севших капель (ink-sim.ts, REVEAL_REACH) идёт по времени: туда — долго, обратно — быстро. */
+const INK_OUT_MS = 3600;
+const INK_BACK_MS = 700;
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -143,6 +156,7 @@ class NightScene {
     isDirect: false,
     drift: HAZE_DRIFT,
     isReducedMotion: false,
+    reveal: 0,
     nowMs: 0,
     hover: this.hover,
     hoverStrength: 0,
@@ -152,6 +166,14 @@ class NightScene {
   private readonly endA: Projected = { x: 0, y: 0, k: 0 };
   private readonly endB: Projected = { x: 0, y: 0, k: 0 };
   private readonly ends = { a: this.endA, b: this.endB };
+  /** Скретч капли-двойника для сетки туши: (r, stretch, dirX, dirY) — круглая, без вытягивания. */
+  private readonly landedDrop = new Float32Array([0, 0, 1, 0]);
+  /** Цели посадки надо выбрать заново (первый кадр, смена размера экрана). */
+  private isLandingStale = true;
+  /** Вылет пыли: цель (0 или 1), значение и время в момент, когда цель сменилась. */
+  private inkOutTarget = 0;
+  private inkOutFrom = 0;
+  private inkOutAt = 0;
   private readonly phraseOpacity: number[];
   private readonly details: DetailsLayer;
   private renderer: NightRenderer | null;
@@ -171,7 +193,18 @@ class NightScene {
   private readonly detailMotion = createDetailMotion();
   private readonly skyLag = { yaw: 0, pitch: 0 };
   private readonly skyDrift = { yaw: 0, pitch: 0 };
+  /** Сдвиг входящей и уходящей детали за ход камеры, px (measureSkyShift). */
+  private readonly lagShift = { x: 0, y: 0 };
+  private readonly driftShift = { x: 0, y: 0 };
+  /** Мнимое небо общего плана: по нему едут гравюры, когда камера к фигуре не поворачивает (overview-sky.ts). */
+  private readonly overviewSky = new OverviewSky();
   private activeDetailFigure = 0;
+  /**
+   * Передача деталей при смене фигуры посреди хода: с чего продолжить, чтобы картинка не моргнула.
+   * incomingFrom — прозрачность входящей, если она как раз уходила (скролл назад); leavingFrom — прозрачность
+   * уходящей в момент смены (могла ещё не проявиться до конца); leavingOffset — её сдвиг от угла в тот момент, px.
+   */
+  private readonly handoff = { incomingFrom: 0, leavingFrom: 1, leavingOffsetX: 0, leavingOffsetY: 0 };
   private lastFrameAt = 0;
   private drawing: Drawing = EMPTY_DRAWING;
   private finishedAt: number | null = null;
@@ -264,6 +297,7 @@ class NightScene {
       this.wasSideLayout = this.sideLayout.matches;
       this.setFigureStates();
     }
+    this.isLandingStale = true;
     this.grid.resize(this.view);
     this.cursorField.build(this.view);
     this.ink.resetMotion();
@@ -426,15 +460,21 @@ class NightScene {
    */
   private renderFrame(now: number): void {
     this.frameId = 0;
-    if (!this.renderer || this.frame.stage <= 0) return;
+    if (!this.renderer) return;
+    if (this.frame.stage <= 0) {
+      this.prepareFrame(now);
+      return;
+    }
     const isAnimating = this.updateInput(now);
     const isLooking = this.updateLook(now);
     const isCameraMoving = this.moveCamera(now);
+    this.publishLanding(now);
     this.updateDetailMotion(now);
     this.updateDetails();
     this.writeSegments();
     this.updateSideFade(now);
     this.ink.step(this.inkStep, this.projector, this.grid);
+    this.addLandedDrops();
     this.updateStarSwarm();
     // Длительность кадра для поля курсора: после паузы (вкладка, скролл издалека) — не больше 50 мс
     this.cursorField.step(Math.min(50, now - this.lastFrameAt) || 16.667);
@@ -444,6 +484,51 @@ class NightScene {
     this.renderer.uploadCursor(this.cursorField);
     this.renderer.render(this.input);
     if (isAnimating || isLooking || isCameraMoving || !this.inkStep.isReducedMotion) this.scheduleRender();
+  }
+
+  /**
+   * Ночи ещё не видно, но капли дня уже летят к звёздам (lib/sky-landing.ts): считаем только камеру и места звёзд.
+   * Без анимации камера стоит — хватает кадра на каждое событие скролла.
+   */
+  private prepareFrame(now: number): void {
+    if (!this.frame.isPreparing) return;
+    this.inkStep.target = this.frame.figure;
+    this.inkStep.isReducedMotion = this.reducedMotion.matches;
+    this.moveCamera(now);
+    this.publishLanding(now);
+    if (!this.inkStep.isReducedMotion) this.scheduleRender();
+  }
+
+  /**
+   * Отдаёт каплям дня экранные места звёзд. Сами цели выбираются на общем плане, когда камера до него доехала
+   * (покачивание не в счёт): от ракурса зависит, какие фоновые звёзды в кадре.
+   */
+  private publishLanding(now: number): void {
+    const isOverview = this.inkStep.target === HAZE && this.camera.progress(now) >= 1;
+    if (this.isLandingStale && isOverview) {
+      this.stars.selectLanding(this.view);
+      this.isLandingStale = false;
+    }
+    this.stars.writeLanding(skyLanding);
+  }
+
+  /**
+   * Капли-двойники: там, где на звёзды сели капли дня, ночная сцена рисует такие же капли своей тушью — смена сцен
+   * не видна. Капля тает, пока разгорается её звезда: r = ρ·(1 − a), a — видимость звезды (ковша или фоновой),
+   * то есть капля загорается звездой. Кладутся в сетку после туши, поэтому терминаторы ячеек ставятся ещё раз.
+   */
+  private addLandedDrops(): void {
+    const { backgroundStars, dipperStars } = this.frame;
+    if (backgroundStars >= 1 && dipperStars >= 1) return;
+    const count = Math.min(skyLanding.claimed, skyLanding.count);
+    for (let k = 0; k < count; k++) {
+      const starAlpha = k < DIPPER_STARS.length ? dipperStars : backgroundStars;
+      const radius = (skyLanding.radius[k] ?? 0) * (1 - starAlpha);
+      if (radius < LANDED_MIN_VISIBLE_PX) continue;
+      this.landedDrop[0] = radius;
+      this.grid.add(skyLanding.x[k] ?? 0, skyLanding.y[k] ?? 0, this.landedDrop);
+    }
+    this.grid.end();
   }
 
   /**
@@ -495,25 +580,39 @@ class NightScene {
   /**
    * Движение деталей по ходу камеры: проявление detailFade(p), угасание уходящей фигуры detailOutFade(p)
    * и сдвиг вместе с небом −f·(Δψ, Δθ), включая поворот взгляда за курсором lookYaw/lookPitch (details.ts).
+   * На общем плане (узкий экран) небо стоит — сдвиг берётся от мнимого неба в долях экрана (overview-sky.ts).
    */
   private updateDetailMotion(now: number): void {
     const motion = this.detailMotion;
     const lookX = -this.projector.focal * this.lookYaw * SKY_FOLLOW;
     const lookY = -this.projector.focal * this.lookPitch * SKY_FOLLOW;
-    if (!this.sideLayout.matches) {
-      motion.fade = 1;
-      motion.shiftX = lookX;
-      motion.shiftY = lookY;
-      motion.leavingFigure = null;
-      motion.leavingFade = 0;
-      return;
-    }
     const progress = this.camera.progress(now);
-    motion.fade = detailFade(progress);
-    this.camera.skyLag(this.skyLag);
-    motion.shiftX = -this.projector.focal * this.skyLag.yaw + lookX;
-    motion.shiftY = -this.projector.focal * this.skyLag.pitch + lookY;
+    this.measureSkyShift(progress);
+    const { incomingFrom } = this.handoff;
+    motion.fade = incomingFrom + (1 - incomingFrom) * detailFade(progress);
+    motion.shiftX = this.lagShift.x + lookX;
+    motion.shiftY = this.lagShift.y + lookY;
     this.updateLeavingMotion(progress, lookX, lookY);
+  }
+
+  /** Сдвиги деталей за ход камеры, px: от настоящего неба (ракурс сбоку, −f·угол) или мнимого (общий план). */
+  private measureSkyShift(progress: number): void {
+    if (!this.sideLayout.matches) {
+      this.overviewSky.lagShift(progress, this.view, this.lagShift);
+      this.overviewSky.driftShift(progress, this.view, this.driftShift);
+    } else {
+      const { focal } = this.projector;
+      this.camera.skyLag(this.skyLag);
+      this.camera.skyDrift(this.skyDrift);
+      this.lagShift.x = -focal * this.skyLag.yaw;
+      this.lagShift.y = -focal * this.skyLag.pitch;
+      this.driftShift.x = -focal * this.skyDrift.yaw;
+      this.driftShift.y = -focal * this.skyDrift.pitch;
+    }
+    this.lagShift.x *= DETAIL_TRAVEL;
+    this.lagShift.y *= DETAIL_TRAVEL;
+    this.driftShift.x *= DETAIL_TRAVEL;
+    this.driftShift.y *= DETAIL_TRAVEL;
   }
 
   /** Сдвиг и угасание уходящей фигуры: старт из угла, плавный уход в сторону движения неба + взгляд за курсором. */
@@ -524,10 +623,10 @@ class NightScene {
       motion.leavingFade = 0;
       return;
     }
-    motion.leavingFade = detailOutFade(progress);
-    this.camera.skyDrift(this.skyDrift);
-    motion.leavingShiftX = -this.projector.focal * this.skyDrift.yaw + lookX;
-    motion.leavingShiftY = -this.projector.focal * this.skyDrift.pitch + lookY;
+    const { handoff } = this;
+    motion.leavingFade = handoff.leavingFrom * detailOutFade(progress);
+    motion.leavingShiftX = handoff.leavingOffsetX + this.driftShift.x + lookX;
+    motion.leavingShiftY = handoff.leavingOffsetY + this.driftShift.y + lookY;
   }
 
   /** Сглаживает ракурс за курсором и отдаёт его камере. Возвращает, догоняет ли он ещё цель. */
@@ -561,22 +660,45 @@ class NightScene {
     return state * 2 + Number(this.sideLayout.matches);
   }
 
-  /** Ракурс для состояния туши: фигура сбоку под своим углом (Н2–Н5 на широком экране) или общий план. */
+  /**
+   * Ракурс для состояния туши: фигура сбоку под своим углом (Н2–Н5 на широком экране) или общий план.
+   * На узком экране у фигуры общий план с доворотом неба её бокового ракурса — фон едет при смене фигуры.
+   */
   private shotFor(state: number): Shot {
     const input = { view: this.view, focal: this.projector.focal, key: this.cameraKeyFor(state) };
-    const side = this.sideLayout.matches ? figureSide(state) : null;
+    const side = figureSide(state);
     const bounds = figureBounds(state);
-    if (side && bounds) return figureShot(input, { state, bounds, side });
-    return overviewShot(input, computeLayout(this.view, FIGURE_BOUNDS));
+    if (this.sideLayout.matches && side && bounds) return figureShot(input, { state, bounds, side });
+    const sky = side ? figureSkyTurn(state, side) : undefined;
+    return overviewShot(input, computeLayout(this.view, FIGURE_BOUNDS), sky);
   }
 
   /** Запоминает уходящую фигуру (если была) для плавного исчезновения по ходу движения камеры. */
   private updateLeavingFigure(): void {
+    const motion = this.detailMotion;
+    const { handoff } = this;
     const next = this.inkStep.target;
     const prev = this.activeDetailFigure;
-    const isAnimated = !this.inkStep.isReducedMotion && this.sideLayout.matches && prev >= 1 && prev !== next;
-    this.detailMotion.leavingFigure = isAnimated ? prev : null;
+    const isAnimated = !this.inkStep.isReducedMotion && prev >= 1 && prev !== next;
+    // Продолжаем с того, что было на экране в прошлом кадре: смена посреди хода не должна давать скачка
+    handoff.incomingFrom = isAnimated && motion.leavingFigure === next ? motion.leavingFade : 0;
+    handoff.leavingFrom = motion.fade;
+    handoff.leavingOffsetX = this.lagShift.x;
+    handoff.leavingOffsetY = this.lagShift.y;
+    motion.leavingFigure = isAnimated ? prev : null;
     this.activeDetailFigure = next;
+  }
+
+  /** Наводит камеру и мнимое небо общего плана на ракурс состояния; без анимации — сразу встают в него. */
+  private aimCamera(state: number, now: number): void {
+    const shot = this.shotFor(state);
+    if (this.inkStep.isReducedMotion) {
+      this.camera.snap(shot);
+      this.overviewSky.snap(state);
+      return;
+    }
+    this.overviewSky.aim(state, this.camera.progress(now));
+    this.camera.aim(shot, now);
   }
 
   /** Наводит камеру на ракурс состояния, двигает её и проецирует звёзды. Возвращает, меняется ли ракурс. */
@@ -586,9 +708,7 @@ class NightScene {
       this.cameraKey = key;
       this.updateLeavingFigure();
       // Без анимации камера не едет, а сразу встаёт в новый ракурс
-      const shot = this.shotFor(this.inkStep.target);
-      if (this.inkStep.isReducedMotion) this.camera.snap(shot);
-      else this.camera.aim(shot, now);
+      this.aimCamera(this.inkStep.target, now);
     }
     const isMoving = this.camera.update(now, this.inkStep.isReducedMotion);
     this.applyCamera();
@@ -601,6 +721,31 @@ class NightScene {
     this.input.viewYaw = this.camera.current.yaw;
     this.input.viewPitch = this.camera.current.pitch;
     this.stars.project(this.projector, this.projector.focal / this.camera.current.distance);
+  }
+
+  /**
+   * Ведёт вылет пыли к цели (вылетела или нет) по времени. Без анимации — сразу в цель; так же и на первом кадре,
+   * если страницу открыли уже за Н1 (небо проступило целиком): там дымка должна стоять готовой.
+   * Возвращает, идёт ли ещё вылет.
+   */
+  private updateInkReveal(now: number): boolean {
+    const { inkStep } = this;
+    const target = this.frame.isInkOut ? 1 : 0;
+    const isLateStart = this.lastFrameAt === 0 && this.frame.sky >= 1;
+    if (inkStep.isReducedMotion || isLateStart) {
+      this.inkOutTarget = target;
+      inkStep.reveal = target;
+      return false;
+    }
+    if (target !== this.inkOutTarget) {
+      this.inkOutTarget = target;
+      this.inkOutFrom = inkStep.reveal;
+      this.inkOutAt = now;
+    }
+    // По часам, а не по сумме кадров: редкие кадры (фоновая вкладка) не растягивают вылет
+    const share = Math.min(1, (now - this.inkOutAt) / (target === 1 ? INK_OUT_MS : INK_BACK_MS));
+    inkStep.reveal = this.inkOutFrom + (target - this.inkOutFrom) * share;
+    return share < 1;
   }
 
   /** Заполняет входы рендерера и симуляции из кадра таймлайна и состояния зрителя. Возвращает, нужен ли следующий кадр. */
@@ -616,6 +761,7 @@ class NightScene {
     // Сияние звёзд идёт по времени; без анимации — замирает
     if (!inkStep.isReducedMotion) input.starTimeSeconds = now / 1000;
     inkStep.nowMs = now;
+    const isInkMoving = this.updateInkReveal(now);
     inkStep.hoverStrength = Math.max(0, 1 - (now - this.hoverAt) / HOVER_MS);
     this.cursor.tick(now);
     // После законченной фигуры зрителя (и пока он в Н9) тушь идёт к пунктиру вдоль его линий — напрямую, без галактики
@@ -626,6 +772,7 @@ class NightScene {
     inkStep.sweep = figureSide(inkStep.target) === 'left' ? -1 : 1;
     inkStep.drift = driftOf(inkStep.target);
     return (
+      isInkMoving ||
       inkStep.hoverStrength > 0 ||
       this.cursor.isActive() ||
       this.cursorField.isActive() ||

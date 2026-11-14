@@ -8,6 +8,7 @@ import {
   MAX_DETAIL_OPACITY,
   placeDetail,
   shiftDetail,
+  depthDetail,
 } from './details';
 import { DetailsLayer } from './details-layer';
 import { frameAt } from './timeline';
@@ -95,7 +96,7 @@ describe('placeDetail', () => {
 });
 
 describe('detailOpacity, detailFade и detailOutFade', () => {
-  it('деталь своей фигуры видна вместе с фразой, умноженной на проявление и потолок яркости', () => {
+  it('деталь активной фигуры видна по проявлению в пределах потолка яркости', () => {
     const bearFrame = frameAt(1.2);
     const full = createDetailMotion();
     const half = { ...createDetailMotion(), fade: 0.5 };
@@ -118,22 +119,61 @@ describe('detailOpacity, detailFade и detailOutFade', () => {
     );
   });
 
+  it('пока фигура активна, деталь не гаснет вместе с её фразой (без мигания перед сменой фигуры)', () => {
+    const bearPhraseFadingFrame = frameAt(1.58);
+
+    expect(
+      detailOpacity(bearPhraseFadingFrame, nightDetail({ figure: 1 }), createDetailMotion()),
+    ).toBeCloseTo(MAX_DETAIL_OPACITY);
+  });
+
   it('в общем плане детали скрыты', () => {
     expect(detailOpacity(frameAt(0.4), nightDetail({ figure: 1 }), createDetailMotion())).toBe(0);
   });
 
-  it('проявление начинается на четверти хода камеры и плавно доходит до 1', () => {
+  it('проявление начинается, когда уходящая фигура погасла (45 % хода), и доходит до 1 к 85 %', () => {
     expect(detailFade(0)).toBe(0);
-    expect(detailFade(0.25)).toBe(0);
-    expect(detailFade(0.625)).toBeCloseTo(0.5);
+    expect(detailFade(0.45)).toBe(0);
+    expect(detailFade(0.65)).toBeCloseTo(0.5);
+    expect(detailFade(0.85)).toBe(1);
     expect(detailFade(1)).toBe(1);
   });
 
-  it('угасание уходящей фигуры начинается с 1 и доходит до 0 на трёх четвертях хода', () => {
+  it('уходящая фигура гаснет за первые 45 % хода', () => {
     expect(detailOutFade(0)).toBe(1);
-    expect(detailOutFade(0.375)).toBeCloseTo(0.5);
-    expect(detailOutFade(0.75)).toBe(0);
+    expect(detailOutFade(0.225)).toBeCloseTo(0.5);
+    expect(detailOutFade(0.45)).toBe(0);
     expect(detailOutFade(1)).toBe(0);
+  });
+});
+
+describe('depthDetail', () => {
+  function shiftedSlot(shiftX: number, shiftY: number): ReturnType<typeof createDetailSlot> {
+    return { ...createDetailSlot(), shiftX, shiftY };
+  }
+
+  it('в покое деталь в натуральную величину', () => {
+    const slot = shiftedSlot(0, 0);
+    depthDetail(VIEW, slot);
+    expect(slot.depthScale).toBe(1);
+  });
+
+  it('уехавшая на четверть экрана уходит вглубь полностью — до 90 % размера', () => {
+    const slot = shiftedSlot(360, 0);
+    depthDetail(VIEW, slot);
+    expect(slot.depthScale).toBeCloseTo(0.9);
+  });
+
+  it('на полпути — частично', () => {
+    const slot = shiftedSlot(0, -112.5);
+    depthDetail(VIEW, slot);
+    expect(slot.depthScale).toBeCloseTo(0.95);
+  });
+
+  it('дальше полного сдвига меньше не становится', () => {
+    const slot = shiftedSlot(-2880, 900);
+    depthDetail(VIEW, slot);
+    expect(slot.depthScale).toBeCloseTo(0.9);
   });
 });
 

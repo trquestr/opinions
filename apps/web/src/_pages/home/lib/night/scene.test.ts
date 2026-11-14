@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NIGHT_EPILOGUE, NIGHT_PHRASES } from '../../model/night-script';
-import { Camera, figureBounds } from './camera';
+import { skyLanding } from '../sky-landing';
+import { Camera, CAMERA_MS, figureBounds } from './camera';
 import manifest from './night-manifest.json';
 import { Projector } from './projection';
 import { Cursor } from './cursor';
@@ -93,6 +94,12 @@ function flushAt(nowMs: number): void {
   const queue = frameQueue;
   frameQueue = [];
   queue.forEach((callback) => callback(nowMs));
+}
+
+/** Кадр в startMs, затем кадр, когда ход камеры, начатый в нём, закончился (детали проявляются по ходу камеры). */
+function flushCameraMove(startMs: number): void {
+  flushAt(startMs);
+  flushAt(startMs + CAMERA_MS);
 }
 
 /** matchMedia: совпадают только запросы, в тексте которых есть одна из подстрок. */
@@ -713,12 +720,12 @@ describe('startNightScene: гравюрные детали', () => {
     start(elements);
 
     scrollTo(1.25);
-    flushFrames();
+    flushCameraMove(1000);
 
     const [first, second] = elements.details;
     expect(first?.style.visibility).toBe('visible');
     expect(first?.style.transform).toMatch(
-      /^translate3d\(.+px, .+px, 0(px)?\)(?: rotate\(-?\d+deg\))?(?: scaleX\(-1\))?$/,
+      /^translate3d\(.+px, .+px, 0(px)?\) translate\(.+\) scale\(.+\) translate\(.+\)(?: translate\(.+px, 0px\))?(?: rotate\(-?\d+deg\))?(?: scaleX\(-1\))?$/,
     );
     expect(first?.style.opacity).toBe(String(MAX_DETAIL_OPACITY));
     expect(second?.style.visibility).toBe('visible');
@@ -728,12 +735,12 @@ describe('startNightScene: гравюрные детали', () => {
     const elements = buildElements();
     start(elements);
     scrollTo(1.25);
-    flushFrames();
+    flushCameraMove(1000);
 
     expect(elements.details[0]?.style.visibility).toBe('visible');
 
     scrollTo(2.75);
-    flushFrames();
+    flushCameraMove(1000 + 2 * CAMERA_MS);
 
     expect(elements.details[0]?.style.visibility).toBe('hidden');
   });
@@ -742,12 +749,81 @@ describe('startNightScene: гравюрные детали', () => {
     const elements = buildElements();
     start(elements);
     scrollTo(1.25);
-    flushFrames();
+    flushCameraMove(1000);
 
     scrollTo(0.1);
-    flushFrames();
+    flushCameraMove(1000 + 2 * CAMERA_MS);
 
     expect(elements.details[0]?.style.visibility).toBe('hidden');
+  });
+
+  it('на общем плане деталь въезжает в угол по ходу камеры и проявляется во второй половине хода, пока едет', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+
+    flushAt(1000);
+    expect(elements.details[0]?.style.visibility).not.toBe('visible');
+
+    flushAt(1000 + CAMERA_MS * 0.6);
+    const movingTransform = elements.details[0]?.style.transform;
+    expect(Number(elements.details[0]?.style.opacity)).toBeGreaterThan(0);
+    expect(Number(elements.details[0]?.style.opacity)).toBeLessThan(MAX_DETAIL_OPACITY);
+
+    flushAt(1000 + CAMERA_MS);
+    expect(elements.details[0]?.style.opacity).toBe(String(MAX_DETAIL_OPACITY));
+    expect(elements.details[0]?.style.transform).not.toBe(movingTransform);
+  });
+
+  it('на общем плане уходящая фигура видна в начале хода к следующей, уплывает и гаснет', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushCameraMove(1000);
+    const restingTransform = elements.details[0]?.style.transform;
+
+    scrollTo(2.0);
+    flushAt(1000 + 2 * CAMERA_MS);
+    flushAt(1000 + 2.2 * CAMERA_MS);
+    expect(elements.details[0]?.style.visibility).toBe('visible');
+    expect(elements.details[0]?.style.transform).not.toBe(restingTransform);
+
+    flushAt(1000 + 3 * CAMERA_MS);
+    expect(elements.details[0]?.style.visibility).toBe('hidden');
+  });
+
+  it('смена фигуры посреди проявления: уходящая деталь не вспыхивает ярче, чем была', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushAt(1000);
+    flushAt(1000 + CAMERA_MS * 0.6);
+    const opacityAtSwitch = Number(elements.details[0]?.style.opacity);
+    expect(opacityAtSwitch).toBeGreaterThan(0);
+    expect(opacityAtSwitch).toBeLessThan(MAX_DETAIL_OPACITY);
+
+    scrollTo(2.0);
+    flushAt(1000 + CAMERA_MS * 0.6 + 16);
+
+    expect(Number(elements.details[0]?.style.opacity)).toBeLessThanOrEqual(opacityAtSwitch);
+  });
+
+  it('скролл назад посреди ухода: деталь не пропадает, а продолжает с той же прозрачности', () => {
+    const elements = buildElements();
+    start(elements);
+    scrollTo(1.25);
+    flushCameraMove(1000);
+    scrollTo(2.0);
+    flushAt(1000 + 2 * CAMERA_MS);
+    flushAt(1000 + 2.2 * CAMERA_MS);
+    const opacityAtSwitch = Number(elements.details[0]?.style.opacity);
+    expect(opacityAtSwitch).toBeGreaterThan(0);
+
+    scrollTo(1.25);
+    flushAt(1000 + 2.2 * CAMERA_MS + 16);
+
+    expect(elements.details[0]?.style.visibility).toBe('visible');
+    expect(Number(elements.details[0]?.style.opacity)).toBeCloseTo(opacityAtSwitch, 2);
   });
 
   it('без WebGL детали всё равно проступают по скроллу', () => {
@@ -1135,5 +1211,18 @@ describe('startNightScene: объём фигур по ракурсу героя'
     window.dispatchEvent(new Event('resize'));
 
     expect(yawOf(setState, 1)).toBeUndefined();
+  });
+});
+
+describe('startNightScene: посадка капель дня', () => {
+  it('на подготовительном экране перед ночью сцена публикует места звёзд для капель', () => {
+    skyLanding.count = 0;
+    const elements = buildElements();
+    start(elements);
+
+    scrollTo(-0.5);
+    flushFrames();
+
+    expect(skyLanding.count).toBeGreaterThan(0);
   });
 });

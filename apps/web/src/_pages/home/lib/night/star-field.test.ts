@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createSkyLanding, LANDING_CAPACITY } from '../sky-landing';
 import { Projector } from './projection';
 import { StarField } from './star-field';
 import { STAR_STRIDE } from './stars';
@@ -185,5 +186,71 @@ describe('StarField: звёзды ковша', () => {
 
     expect(field.table[dipperFirst * STAR_STRIDE + 1]).toBeCloseTo(300, 6);
     expect(field.table[(dipperFirst + 1) * STAR_STRIDE]).toBeCloseTo(400, 6);
+  });
+});
+
+describe('StarField: посадка капель', () => {
+  const VIEW = { width: 800, height: 600 };
+  /** Одна проекция, цели выбраны и записаны на стол. */
+  function landed() {
+    const field = new StarField();
+    const projector = createProjector();
+    field.project(projector, focusScale(projector));
+    const landing = createSkyLanding();
+    field.selectLanding(VIEW);
+    field.writeLanding(landing);
+    return { field, landing };
+  }
+
+  it('целей не больше ёмкости стола и не меньше семи звёзд ковша', () => {
+    const { landing } = landed();
+
+    expect(landing.count).toBeGreaterThanOrEqual(7);
+    expect(landing.count).toBeLessThanOrEqual(LANDING_CAPACITY);
+  });
+
+  it('кроме ковша в цели берутся фоновые звёзды кадра', () => {
+    const { landing } = landed();
+
+    expect(landing.count).toBeGreaterThan(7);
+  });
+
+  it('первые семь целей — звёзды ковша по порядку', () => {
+    const { field, landing } = landed();
+    const dipper = field.drawablePoints().slice(0, 7);
+
+    for (const [k, point] of dipper.entries()) {
+      expect(landing.x[k]).toBe(point.x);
+      expect(landing.y[k]).toBe(point.y);
+    }
+  });
+
+  it('радиус севшей капли не меньше 0,9 px у каждой цели', () => {
+    const { landing } = landed();
+
+    for (let k = 0; k < landing.count; k++) {
+      // Float32Array хранит 0.9 как 0.89999998…, поэтому нижняя граница с допуском
+      expect(landing.radius[k]).toBeGreaterThanOrEqual(Math.fround(0.9));
+    }
+  });
+
+  it('фоновые цели лежат в кадре, не ближе 4% стороны к краю', () => {
+    const { landing } = landed();
+
+    for (let k = 7; k < landing.count; k++) {
+      expect(landing.x[k]).toBeGreaterThan(VIEW.width * 0.04);
+      expect(landing.x[k]).toBeLessThan(VIEW.width * 0.96);
+      expect(landing.y[k]).toBeGreaterThan(VIEW.height * 0.04);
+      expect(landing.y[k]).toBeLessThan(VIEW.height * 0.96);
+    }
+  });
+
+  it('без выбора целей на стол пишется ноль целей', () => {
+    const field = new StarField();
+    const landing = createSkyLanding();
+
+    field.writeLanding(landing);
+
+    expect(landing.count).toBe(0);
   });
 });

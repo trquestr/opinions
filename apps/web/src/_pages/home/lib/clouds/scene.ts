@@ -1,3 +1,4 @@
+import { skyLanding } from '../sky-landing';
 import { CLOUDS_FORMATION, projectCloud } from './clouds-formation';
 import { CloudsSimulation } from './clouds-sim';
 import { createCloudsRenderer, type CloudsRenderer } from './clouds-renderer';
@@ -76,6 +77,7 @@ export class CloudsScene {
     this.sim = new CloudsSimulation({
       count: pickDropCount(this.isSmallScreen),
       isSmallScreen: this.isSmallScreen,
+      landing: skyLanding,
     });
     const { back, front } = initRenderers(el);
     this.rendererBack = back;

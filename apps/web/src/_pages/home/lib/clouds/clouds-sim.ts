@@ -1,3 +1,4 @@
+import { LANDING_CAPACITY, type SkyLanding } from '../sky-landing';
 import type { CloudsFrame } from './timeline';
 
 export interface CursorState {
@@ -15,6 +16,8 @@ export interface SimContext {
 export interface SimOptions {
   readonly count: number;
   readonly isSmallScreen: boolean;
+  /** Стол посадки на звёзды ночи (lib/sky-landing.ts); без него капли не садятся. */
+  readonly landing?: SkyLanding;
 }
 
 export interface ParticleSlice {
@@ -44,6 +47,12 @@ const FADE_PX = 70;
 const BACK_SHARE = 0.42;
 /** Капля включается по своей очереди плавно, на этом отрезке доли капель. */
 const RANK_FADE = 0.08;
+/** Посадка на звёзды: капли срываются к целям по очереди, разброс очереди — эта доля хода посадки. */
+const LAND_STAGGER = 0.35;
+/** С этой доли пути к звезде капля уже не перескакивает с края на край: иначе прыжок был бы виден. */
+const LAND_NO_WRAP = 0.1;
+/** Капля, которая сейчас выше своей звезды, «дороже»: цели разбирают в первую очередь капли снизу (небо — вверху). */
+const LAND_ABOVE_COST = 4;
 
 function sliceOf(arrays: ParticleSlice, from: number, to: number): ParticleSlice {
   return {
@@ -60,6 +69,16 @@ function sliceOf(arrays: ParticleSlice, from: number, to: number): ParticleSlice
 
 function wrap01(value: number): number {
   return value - Math.floor(value);
+}
+
+/** Значение на доле share пути от value к goal; без цели остаётся на месте. */
+function approach(share: number, value = 0, goal = value): number {
+  return value + (goal - value) * share;
+}
+
+function smoothstep(x: number): number {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
 }
 
 interface StepEnv {
@@ -81,6 +100,16 @@ interface StepEnv {
  * (скролл назад ведёт капли вниз), затухает как exp(−DRAG·dt). Дойдя до края, капля входит с другого на новой дорожке.
  * Память выделяется один раз во Float32Array (без аллокаций в rAF).
  * Капли разделены на эшелон ПОД облаками (back) и эшелон НАД облаками (front).
+ *
+ * ПОСАДКА НА ЗВЁЗДЫ (О6, под вуалью сумерек). Ночная сцена отдаёт экранные места звёзд T_k и радиусы севших капель
+ * ρ_k (lib/sky-landing.ts). Когда ход посадки s (frame.settle) становится больше нуля, цели раздаются каплям:
+ * каждой цели — ближайшая свободная капля, причём капля выше цели считается в LAND_ABOVE_COST раз дальше по высоте
+ * (капли летят вверх, в небо). Дальше для капли i с личной очередью h_i ∈ [0, 1):
+ *   e = smoothstep((s − 0.35·h_i) / 0.65) — капли срываются к звёздам не разом, а россыпью;
+ *   место:  P = P_своб + (T_k − P_своб)·e, где P_своб — обычный путь капли; её собственная скорость гаснет как (1 − e)²;
+ *   радиус: r = r_i + (ρ_k − r_i)·e — капля сжимается в точку; вытянутость ×(1 − e).
+ * Всё — функция скролла: при прокрутке назад капли так же плавно отпускают звёзды. Капли, которым цели не хватило,
+ * растворяются: α ×(1 − smoothstep(s)).
  */
 export class CloudsSimulation {
   readonly count: number;
@@ -107,6 +136,14 @@ export class CloudsSimulation {
   private readonly offsetY: Float32Array;
   /** Очередь включения: капля видна, когда доля капель кадра больше её rank. */
   private readonly rank: Float32Array;
+  /** Радиус капли в свободном полёте: radius на посадке сжимается к радиусу севшей капли. */
+  private readonly baseRadius: Float32Array;
+  /** Личная очередь посадки h ∈ [0, 1) и номер цели на столе посадки (−1 — цели нет). */
+  private readonly landOrder: Float32Array;
+  private readonly targetOf: Int16Array;
+  private readonly isTaken: Uint8Array;
+  private readonly landing: SkyLanding | undefined;
+  private isAssigned = false;
   private impulse = 0;
   private timeSeconds = 0;
 
@@ -135,6 +172,12 @@ export class CloudsSimulation {
     this.offsetX = new Float32Array(this.count);
     this.offsetY = new Float32Array(this.count);
     this.rank = new Float32Array(this.count);
+    this.baseRadius = new Float32Array(this.count);
+    this.landOrder = new Float32Array(this.count);
+    this.targetOf = new Int16Array(this.count).fill(-1);
+    this.isTaken = new Uint8Array(this.count);
+    this.landing = options.landing;
+    if (this.landing) this.landing.claimed = Math.min(this.count, LANDING_CAPACITY);
 
     for (let i = 0; i < this.count; i++) {
       this.initParticle(i);
@@ -151,7 +194,9 @@ export class CloudsSimulation {
     this.travel[i] = Math.random();
     this.baseSpeed[i] = isBack ? 18 + Math.random() * 32 : 30 + Math.random() * 60;
     this.speedFactor[i] = isBack ? 0.45 + Math.random() * 0.9 : 0.8 + Math.random() * 1.4;
-    this.radius[i] = isBack ? 1.2 + Math.random() * 1.5 : 1.8 + Math.random() * 2.4;
+    this.baseRadius[i] = isBack ? 1.2 + Math.random() * 1.5 : 1.8 + Math.random() * 2.4;
+    this.radius[i] = this.baseRadius[i] ?? 0;
+    this.landOrder[i] = Math.random();
     this.swayAmp[i] = 6 + Math.random() * 16;
     this.swayFreq[i] = 0.25 + Math.random() * 0.5;
     this.swayPhase[i] = Math.random() * Math.PI * 2;
@@ -171,6 +216,7 @@ export class CloudsSimulation {
       return;
     }
     this.timeSeconds += dt;
+    this.assignTargets(frame.settle);
     this.impulse *= Math.exp(-DRAG_COEFFICIENT * dt);
     if (Math.abs(this.impulse) < 0.1) this.impulse = 0;
 
@@ -186,10 +232,62 @@ export class CloudsSimulation {
     }
   }
 
-  /** Двигает каплю по пути и возвращает её скорость вверх, px/с. */
-  private advance(i: number, env: StepEnv): number {
-    const speed = (this.baseSpeed[i] ?? 0) * env.frame.rise + this.impulse * (this.speedFactor[i] ?? 1);
+  /**
+   * Раздаёт каплям цели на столе посадки — один раз, когда посадка началась (в этот момент e = 0 у всех капель,
+   * поэтому раздача не видна). Выше начала посадки раздача сбрасывается: при новом заходе цели раздаются заново.
+   */
+  private assignTargets(settle: number): void {
+    const { landing } = this;
+    if (!landing || settle <= 0) {
+      this.isAssigned = false;
+      return;
+    }
+    if (this.isAssigned || landing.count === 0) return;
+    this.isAssigned = true;
+    this.targetOf.fill(-1);
+    this.isTaken.fill(0);
+    const targetCount = Math.min(this.count, landing.count);
+    for (let target = 0; target < targetCount; target++) {
+      const drop = this.nearestFreeDrop(landing.x[target] ?? 0, landing.y[target] ?? 0);
+      if (drop < 0) return;
+      this.targetOf[drop] = target;
+      this.isTaken[drop] = 1;
+    }
+  }
+
+  /** Ближайшая к цели свободная капля: d² = Δx² + w·Δy², w = LAND_ABOVE_COST для капли выше цели (y вниз). */
+  private nearestFreeDrop(targetX: number, targetY: number): number {
+    let nearest = -1;
+    let nearestCost = Infinity;
+    for (let i = 0; i < this.count; i++) {
+      if (this.isTaken[i]) continue;
+      const dx = (this.x[i] ?? 0) - targetX;
+      const dy = (this.y[i] ?? 0) - targetY;
+      const cost = dx * dx + dy * dy * (dy < 0 ? LAND_ABOVE_COST : 1);
+      if (cost < nearestCost) {
+        nearestCost = cost;
+        nearest = i;
+      }
+    }
+    return nearest;
+  }
+
+  /** Доля пути капли к своей звезде: e = smoothstep((s − 0.35·h) / 0.65); без цели — 0. */
+  private landShareOf(i: number, settle: number): number {
+    if (!this.isAssigned || (this.targetOf[i] ?? -1) < 0) return 0;
+    return smoothstep((settle - LAND_STAGGER * (this.landOrder[i] ?? 0)) / (1 - LAND_STAGGER));
+  }
+
+  /** Двигает каплю по пути и возвращает её скорость вверх, px/с. На посадке своя скорость гаснет как (1 − e)². */
+  private advance(i: number, env: StepEnv, land: number): number {
+    const free = (1 - land) * (1 - land);
+    const speed =
+      ((this.baseSpeed[i] ?? 0) * env.frame.rise + this.impulse * (this.speedFactor[i] ?? 1)) * free;
     const next = (this.travel[i] ?? 0) + (speed * env.dt) / env.travelPx;
+    if (land > LAND_NO_WRAP) {
+      this.travel[i] = Math.min(0.9999, Math.max(0, next));
+      return speed;
+    }
     if (next < 0 || next >= 1) {
       this.lane[i] = Math.random();
       this.offsetX[i] = 0;
@@ -219,6 +317,20 @@ export class CloudsSimulation {
     this.x[i] = (this.lane[i] ?? 0) * env.ctx.width + sway * (this.swayAmp[i] ?? 0) + (this.offsetX[i] ?? 0);
     const pathY = env.ctx.height + EDGE_MARGIN_PX - (this.travel[i] ?? 0) * env.travelPx;
     this.y[i] = pathY + (this.offsetY[i] ?? 0);
+    this.radius[i] = this.baseRadius[i] ?? 0;
+  }
+
+  /** Ведёт каплю к её звезде: место, радиус, круглая форма и полная видимость — по доле пути e (формулы — выше). */
+  private settleOnStar(i: number, land: number, stage: number): void {
+    const { landing } = this;
+    const target = this.targetOf[i] ?? -1;
+    if (!landing || target < 0) return;
+    this.x[i] = approach(land, this.x[i], landing.x[target]);
+    this.y[i] = approach(land, this.y[i], landing.y[target]);
+    this.radius[i] = approach(land, this.radius[i], landing.radius[target]);
+    this.stretch[i] = approach(land, this.stretch[i], 0);
+    // У края экрана свободная капля прозрачна, а севшая видна целиком
+    this.alpha[i] = approach(land, this.alpha[i], stage);
   }
 
   /** Капля вытягивается вдоль хода: stretch → min(1.2, |v| / 200), сглаженно; острым концом назад. */
@@ -233,14 +345,20 @@ export class CloudsSimulation {
     const pathPx = (this.travel[i] ?? 0) * env.travelPx;
     const edgeFade = Math.min(1, pathPx / FADE_PX, (env.travelPx - pathPx) / FADE_PX);
     const rankFade = Math.min(1, Math.max(0, (env.frame.dropsFraction - (this.rank[i] ?? 0)) / RANK_FADE));
-    this.alpha[i] = Math.max(0, edgeFade) * rankFade * env.frame.dropsVisibility * env.frame.stage;
+    // Капля без звезды растворяется по ходу посадки
+    const isSpare = this.isAssigned && (this.targetOf[i] ?? -1) < 0;
+    const spareFade = isSpare ? 1 - smoothstep(env.frame.settle) : 1;
+    this.alpha[i] =
+      Math.max(0, edgeFade) * rankFade * spareFade * env.frame.dropsVisibility * env.frame.stage;
   }
 
   private stepParticle(i: number, env: StepEnv): void {
-    const speed = this.advance(i, env);
+    const land = this.landShareOf(i, env.frame.settle);
+    const speed = this.advance(i, env, land);
     this.repel(i, env);
     this.place(i, env);
     this.shape(i, speed, env.dt);
     this.fade(i, env);
+    if (land > 0) this.settleOnStar(i, land, env.frame.stage);
   }
 }

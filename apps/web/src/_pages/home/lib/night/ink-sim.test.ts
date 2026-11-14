@@ -40,6 +40,7 @@ const STILL_STEP: InkStep = {
   sweep: 1,
   drift: 0,
   isReducedMotion: false,
+  reveal: 1,
   nowMs: 0,
   hover: { x: 0, y: 0 },
   hoverStrength: 0,
@@ -333,6 +334,32 @@ describe('InkSimulation: радиус и просвет', () => {
     const sim = createSim({ states: [Int16Array.of(2000, 1000, 5)] });
 
     expect(stepOnce(sim, {})).toHaveLength(1);
+  });
+});
+
+describe('InkSimulation: проявление туши', () => {
+  it('при reveal = 0 капля вдали от звёзд ковша ещё не проступила', () => {
+    expect(stepOnce(createSim(), { reveal: 0 })).toEqual([]);
+  });
+
+  it('при reveal = 1 та же капля нарисована полным радиусом', () => {
+    const drops = stepOnce(createSim(), { reveal: 1 });
+
+    expect(drops).toHaveLength(1);
+    expect(drops[0]?.r).toBeCloseTo(5, 2);
+  });
+
+  it('в полёте пылинка лежит между своей звездой и своим местом, на той же высоте', () => {
+    // Звезда слева от места капли (20, 10) на той же высоте: пылинка вылетает из неё вправо
+    const star = { x: 0, y: 10 };
+    const landed = stepOnce(createSim({ dipper: [star] }), { reveal: 1 })[0];
+    const starOnScreen = LAYOUT.originX + star.x * LAYOUT.scale;
+
+    const flying = stepOnce(createSim({ dipper: [star] }), { reveal: 0.3 })[0];
+
+    expect(flying?.x).toBeGreaterThan(starOnScreen);
+    expect(flying?.x).toBeLessThan(landed?.x ?? 0);
+    expect(flying?.y).toBeCloseTo(landed?.y ?? 0, 2);
   });
 });
 

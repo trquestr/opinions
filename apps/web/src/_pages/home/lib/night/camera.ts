@@ -103,8 +103,19 @@ interface ShotInput {
   readonly key: number;
 }
 
-/** Общий план: прямо, точка взгляда — то место мира, что плоская раскладка ставит в центр экрана. */
-export function overviewShot(input: ShotInput, overview: Layout): Shot {
+/** Доворот неба без поворота: общий план без фигуры. */
+const NO_SKY_TURN = { yaw: 0, pitch: 0 } as const;
+
+/**
+ * Общий план: прямо, точка взгляда — то место мира, что плоская раскладка ставит в центр экрана.
+ * sky — доворот неба (на узком экране у фигуры тот же, что у её бокового ракурса): фон едет при смене фигуры,
+ * а сама фигура остаётся в центре.
+ */
+export function overviewShot(
+  input: ShotInput,
+  overview: Layout,
+  sky: { readonly yaw: number; readonly pitch: number } = NO_SKY_TURN,
+): Shot {
   const { view, focal, key } = input;
   const anchorX = view.width / 2;
   const anchorY = view.height / 2;
@@ -120,8 +131,8 @@ export function overviewShot(input: ShotInput, overview: Layout): Shot {
       targetZ: 0,
       anchorX,
       anchorY,
-      skyYaw: 0,
-      skyPitch: 0,
+      skyYaw: sky.yaw,
+      skyPitch: sky.pitch,
     },
   };
 }
@@ -217,6 +228,9 @@ export class Camera {
   /** Поворот за курсором (рад), см. setLook; в снимок хода не входит. */
   private lookYaw = 0;
   private lookPitch = 0;
+  /** Отклонение покачивания в последнем кадре (рад); в снимок хода не входит — его добавит applySway. */
+  private swayYaw = 0;
+  private swayPitch = 0;
 
   /** Сразу встать в ракурс без хода (первый кадр, ресайз, без анимации). */
   snap(shot: Shot): void {
@@ -239,9 +253,10 @@ export class Camera {
       return;
     }
     copyPose(this.from, this.current);
-    // Поворот за курсором живёт поверх хода: в начало хода его не запекаем, иначе он применится дважды
-    this.from.yaw -= this.lookYaw;
-    this.from.pitch -= this.lookPitch;
+    // Поворот за курсором и покачивание живут поверх хода: в начало хода их не запекаем, иначе они применятся
+    // дважды и небо в первый кадр хода прыгнет на величину покачивания (до 5°)
+    this.from.yaw -= this.lookYaw + this.swayYaw;
+    this.from.pitch -= this.lookPitch + this.swayPitch;
     copyPose(this.to, shot.pose);
     this.fromSway = this.sway;
     this.toSway = shot.sway;
@@ -287,6 +302,8 @@ export class Camera {
     this.current.yaw = this.base.yaw + HOLD_ORBIT_RADIANS * hold;
     this.sway = lerp(this.fromSway, this.toSway, e);
     const isSwaying = !isStill && this.sway > 0;
+    this.swayYaw = 0;
+    this.swayPitch = 0;
     if (isSwaying) this.applySway(nowMs / 1000);
     this.current.yaw += this.lookYaw;
     this.current.pitch += this.lookPitch;
@@ -310,7 +327,9 @@ export class Camera {
    * движение не повторяется; при повороте звёзды ковша на разной глубине смещаются друг относительно друга.
    */
   private applySway(t: number): void {
-    this.current.yaw += this.sway * SWAY_YAW * Math.sin((2 * Math.PI * t) / SWAY_YAW_PERIOD_S);
-    this.current.pitch += this.sway * SWAY_PITCH * Math.sin((2 * Math.PI * t) / SWAY_PITCH_PERIOD_S + 1);
+    this.swayYaw = this.sway * SWAY_YAW * Math.sin((2 * Math.PI * t) / SWAY_YAW_PERIOD_S);
+    this.swayPitch = this.sway * SWAY_PITCH * Math.sin((2 * Math.PI * t) / SWAY_PITCH_PERIOD_S + 1);
+    this.current.yaw += this.swayYaw;
+    this.current.pitch += this.swayPitch;
   }
 }

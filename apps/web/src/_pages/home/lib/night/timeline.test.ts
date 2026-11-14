@@ -93,3 +93,33 @@ describe('frameAt', () => {
     expect(frameAt(2.7)).toEqual(frameAt(2.7));
   });
 });
+
+describe('frameAt: подготовка к посадке капель', () => {
+  it('за экран до сцены капли дня ещё не получают места звёзд', () => {
+    expect(frameAt(-1.5).isPreparing).toBe(false);
+    expect(frameAt(-1).isPreparing).toBe(false);
+  });
+
+  it('на последнем экране дня сцена готовит места звёзд, не будучи видимой', () => {
+    expect(frameAt(-0.5).isPreparing).toBe(true);
+    expect(frameAt(-0.5).stage).toBe(0);
+  });
+
+  it('когда ночь начала проступать, подготовка кончается', () => {
+    expect(frameAt(-0.12).isPreparing).toBe(true);
+    expect(frameAt(0).isPreparing).toBe(false);
+    expect(frameAt(3).isPreparing).toBe(false);
+  });
+});
+
+describe('frameAt: вылет пыли', () => {
+  it('пока ночь не проступила, пыль не вылетела', () => {
+    expect(frameAt(-0.5).isInkOut).toBe(false);
+    expect(frameAt(-0.05).isInkOut).toBe(false);
+  });
+
+  it('с −0,04 экрана пыль вылетела и остаётся до конца сцены', () => {
+    expect(frameAt(-0.04).isInkOut).toBe(true);
+    expect(frameAt(5).isInkOut).toBe(true);
+  });
+});

@@ -1,3 +1,4 @@
+import { LANDING_CAPACITY, type SkyLanding } from '../sky-landing';
 import { createSkyDirections, depthAt, DIPPER_DEPTHS } from './projection';
 import {
   buildStarTable,
@@ -7,7 +8,7 @@ import {
   INVITE_STARS,
   STAR_STRIDE,
 } from './stars';
-import type { Point } from './layout';
+import type { Point, Size } from './layout';
 import type { Projected, Projector } from './projection';
 
 /*
@@ -29,6 +30,14 @@ const SEED = 47;
 const INVITE_DEPTH_SPREAD = 10;
 const DIPPER_GROW = { min: 0.75, max: 1.35 } as const;
 const FREE_GROW = { min: 0.5, max: 1.6 } as const;
+/**
+ * Посадка капель дня (lib/sky-landing.ts). Радиус севшей капли — по ядру звезды s (px): у ковша 0.75·s, у фоновой
+ * 1.1·s, но не меньше LANDED_MIN_RADIUS_PX (мельче капля не читается). Фоновая звезда годится в цели, если она
+ * в кадре не ближе LANDING_MARGIN (доля стороны экрана) к краю.
+ */
+const LANDED_RADIUS = { dipper: 0.75, background: 1.1 } as const;
+const LANDED_MIN_RADIUS_PX = 0.9;
+const LANDING_MARGIN = 0.04;
 
 /** Как проецировать звезду: направление неба, точка ковша (сдержанный рост) или точка слоя (свободный рост). */
 const MODE = { sky: 0, dipper: 1, free: 2 } as const;
@@ -79,6 +88,9 @@ export class StarField {
   private readonly point: Projected = { x: 0, y: 0, k: 0 };
   /** Скретч мировой точки звезды — без аллокаций в кадре. */
   private readonly source = { x: 0, y: 0, z: 0 };
+  /** Звёзды, на которые садятся капли дня (номера строк таблицы): сначала семь ковша, потом фоновые по яркости. */
+  private readonly landingStars = new Int16Array(LANDING_CAPACITY);
+  private landingCount = 0;
 
   constructor() {
     const base = buildStarTable();
@@ -135,6 +147,51 @@ export class StarField {
     if (this.mode[i] === MODE.sky) return this.point.k;
     const grow = this.mode[i] === MODE.dipper ? DIPPER_GROW : FREE_GROW;
     return Math.min(grow.max, Math.max(grow.min, closeness));
+  }
+
+  /**
+   * Выбирает цели посадки по текущей проекции: семь звёзд ковша и самые яркие фоновые звёзды в кадре.
+   * Вызывается при смене размера экрана, не в каждом кадре (сортирует и создаёт массивы).
+   */
+  selectLanding(view: Size): void {
+    const inFrame: number[] = [];
+    for (let i = 0; i < this.firstDrawable; i++) {
+      if (this.isInFrame(i, view)) inFrame.push(i);
+    }
+    const brightness = (i: number): number => this.table[rowAt(i) + 3] ?? 0;
+    inFrame.sort((a, b) => brightness(b) - brightness(a));
+    const dipper = DIPPER_STARS.map((_, i) => this.firstDrawable + i);
+    const chosen = [...dipper, ...inFrame].slice(0, LANDING_CAPACITY);
+    this.landingStars.set(chosen);
+    this.landingCount = chosen.length;
+  }
+
+  private isInFrame(i: number, view: Size): boolean {
+    const at = rowAt(i);
+    const x = (this.table[at] ?? 0) / view.width;
+    const y = (this.table[at + 1] ?? 0) / view.height;
+    const isVisible = (this.table[at + 2] ?? 0) > 0;
+    return (
+      isVisible &&
+      x > LANDING_MARGIN &&
+      x < 1 - LANDING_MARGIN &&
+      y > LANDING_MARGIN &&
+      y < 1 - LANDING_MARGIN
+    );
+  }
+
+  /** Пишет на стол посадки экранные места выбранных звёзд и радиусы севших капель (каждый кадр, без аллокаций). */
+  writeLanding(landing: SkyLanding): void {
+    const target = landing;
+    for (let k = 0; k < this.landingCount; k++) {
+      const star = this.landingStars[k] ?? 0;
+      const at = rowAt(star);
+      const share = star >= this.firstDrawable ? LANDED_RADIUS.dipper : LANDED_RADIUS.background;
+      target.x[k] = this.table[at] ?? 0;
+      target.y[k] = this.table[at + 1] ?? 0;
+      target.radius[k] = Math.max(LANDED_MIN_RADIUS_PX, (this.table[at + 2] ?? 0) * share);
+    }
+    target.count = this.landingCount;
   }
 
   /** Экранные положения звёзд, между которыми рисует зритель (ковш, затем тусклые) — для попадания курсора. */

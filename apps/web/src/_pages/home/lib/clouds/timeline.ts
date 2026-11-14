@@ -8,6 +8,8 @@ export const PHRASE_FADE_SCREENS = 0.1;
 /** Вуаль сумерек (О6): пунктир опускается по листу между этими экранами (lib/clouds/dusk-veil.ts). */
 export const VEIL_START = 2.2;
 export const VEIL_END = 2.88;
+/** Посадка капель на звёзды (О6): начинается под вуалью и кончается вместе с ней — дальше проступает ночь. */
+const SETTLE_START = 2.3;
 
 export interface CloudsFrame {
   readonly u: number;
@@ -31,6 +33,8 @@ export interface CloudsFrame {
   readonly rise: number;
   /** Ход вуали сумерек: 0 — день, 1 — весь лист в негативе (ночь). */
   readonly veil: number;
+  /** Ход посадки капель на звёзды ночи, 0…1 (clouds-sim.ts): к концу вуали каждая капля стоит на своей звезде. */
+  readonly settle: number;
   /** Непрозрачность каждой из 4 фраз. */
   readonly phrases: readonly number[];
 }
@@ -84,6 +88,7 @@ export function frameAt(u: number): CloudsFrame {
   // О6: вуаль сумерек (без smoothstep — чтобы середина полосы, где точки переходят в чёрное, не ускорялась)
   const veil = ramp(u, VEIL_START, VEIL_END);
   const rise = (0.35 + 0.65 * rainUp) * (1 - 0.8 * veil);
+  const settle = ramp(u, SETTLE_START, VEIL_END);
 
   // Фразы О2–О5
   const phrases = CLOUDS_PHRASES.map((phrase) =>
@@ -101,6 +106,7 @@ export function frameAt(u: number): CloudsFrame {
     dropsFraction,
     rise,
     veil,
+    settle,
     phrases,
   };
 }

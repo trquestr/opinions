@@ -74,6 +74,21 @@ const STRETCH_EASE = 0.25;
 const OFFSET_EASE = 0.22;
 /** Капли меньше этого радиуса не рисуются: это «растворённая» тушь. */
 const MIN_VISIBLE_PX = 0.45;
+/**
+ * ВЫЛЕТ ПЫЛИ в Н1 (InkStep.reveal = ρ, 0…1, идёт по времени — scene.ts). На семь звёзд ковша только что сели капли
+ * дня; каждая рассыпается в пыль, и эта пыль — дымка. Капля туши i стартует из ближайшей к её месту звезды S
+ * (глубина — лист ковша в этой точке) и летит на своё место G:
+ *   очередь:  o = 0.5·(0.6·min(1, d/D) + 0.4·h₂) — ближние к звезде вылетают раньше, d = |G − S|, D — дальность
+ *             (0.9 диагонали границ фигур), h₂ — личный разброс;
+ *   ход:      e = clamp((ρ − o) / 0.5, 0, 1), путь s = 1 − (1 − e)² — быстрый вылет и плавное торможение (брызги);
+ *   место:    P = S + (G − S)·s;   радиус: ×smoothstep(e / 0.25) — пылинка проступает уже в полёте, у самой звезды;
+ *   просвет вокруг звёзд (CLEAR_*) включается по ходу s: иначе пылинка была бы невидима, пока не отлетит от звезды.
+ * При ρ = 1 всё на местах, формулы не считаются.
+ */
+const REVEAL_REACH = 0.9;
+const REVEAL_SPREAD = 0.5;
+const REVEAL_NEAR_SHARE = 0.6;
+const REVEAL_GROW = 0.25;
 
 export interface InkStep {
   /** Состояние, к которому идёт тушь (дымка, фигура, пунктир зрителя). */
@@ -85,6 +100,8 @@ export interface InkStep {
   /** Амплитуда дрейфа в покое у цели, единицы: у дымки большая, у фигуры малая. */
   readonly drift: number;
   readonly isReducedMotion: boolean;
+  /** Вылет пыли из семи звёзд ковша, 0…1 (см. REVEAL_REACH). */
+  readonly reveal: number;
   readonly nowMs: number;
   /** Звезда под курсором (единицы) и сила вздрагивания 0…1. */
   readonly hover: Point;
@@ -109,6 +126,11 @@ interface Placement {
   y: number;
   z: number;
   r: number;
+}
+
+/** Просвет туши у звезды ковша: 0 внутри CLEAR_INNER, 1 от CLEAR_OUTER. */
+function clearAt(distance: number): number {
+  return smoothstep((distance - CLEAR_INNER) / (CLEAR_OUTER - CLEAR_INNER));
 }
 
 function smoothstep(x: number): number {
@@ -159,6 +181,10 @@ export class InkSimulation {
   private readonly curZ: Float32Array;
   private readonly influence: Influence = { shiftX: 0, shiftY: 0, grow: 1 };
   private readonly options: InkSimulationOptions;
+  /** Дальность волны проявления, единицы. */
+  private readonly revealReach: number;
+  /** Ближайшая к текущей капле звезда ковша (пишет findNearestStar). */
+  private nearStar: Point;
   private target = -1;
   private isDirect = false;
   private startMs = 0;
@@ -176,6 +202,9 @@ export class InkSimulation {
   constructor(count: number, options: InkSimulationOptions) {
     this.count = count;
     this.options = options;
+    const { minX, minY, maxX, maxY } = options.bounds;
+    this.nearStar = options.center;
+    this.revealReach = REVEAL_REACH * Math.hypot(maxX - minX, maxY - minY);
     const random = createRandom(SEED);
     this.seedA = Float32Array.from({ length: count }, () => random());
     this.seedB = Float32Array.from({ length: count }, () => random());
@@ -311,7 +340,7 @@ export class InkSimulation {
     this.curZ[i] = p.z;
     this.applyDrift(i, frame);
     this.applyHover(input, this.seedB[i] ?? 0);
-    const clear = smoothstep((this.nearestStar(p.x, p.y) - CLEAR_INNER) / (CLEAR_OUTER - CLEAR_INNER));
+    const clear = this.revealDrop(i, input.reveal);
     const screen = projector.project(p, this.screen);
     this.baseX = screen.x;
     this.baseY = screen.y;
@@ -442,9 +471,39 @@ export class InkSimulation {
     return influence.grow;
   }
 
-  private nearestStar(x: number, y: number): number {
+  /**
+   * Вылет пыли (формулы — у REVEAL_REACH): ставит каплю на её путь от ближайшей звезды ковша и возвращает
+   * множитель радиуса — просвет вокруг звёзд, а в полёте ещё и проявление пылинки.
+   */
+  private revealDrop(i: number, reveal: number): number {
+    const p = this.place;
+    const distance = this.findNearestStar(p.x, p.y);
+    if (reveal >= 1) return clearAt(distance);
+    const order =
+      REVEAL_SPREAD *
+      (REVEAL_NEAR_SHARE * Math.min(1, distance / this.revealReach) +
+        (1 - REVEAL_NEAR_SHARE) * (this.seedB[i] ?? 0));
+    const e = Math.min(1, Math.max(0, (reveal - order) / (1 - REVEAL_SPREAD)));
+    const path = 1 - (1 - e) ** 2;
+    const star = this.nearStar;
+    p.x = star.x + (p.x - star.x) * path;
+    p.y = star.y + (p.y - star.y) * path;
+    const starDepth = depthAt(star.x, star.y);
+    p.z = starDepth + (p.z - starDepth) * path;
+    const clear = clearAt(this.findNearestStar(p.x, p.y));
+    return (1 + (clear - 1) * path) * smoothstep(e / REVEAL_GROW);
+  }
+
+  /** Расстояние до ближайшей звезды ковша; саму звезду кладёт в nearStar. */
+  private findNearestStar(x: number, y: number): number {
     let nearest = Infinity;
-    for (const star of this.options.dipper) nearest = Math.min(nearest, Math.hypot(x - star.x, y - star.y));
+    for (const star of this.options.dipper) {
+      const distance = Math.hypot(x - star.x, y - star.y);
+      if (distance < nearest) {
+        nearest = distance;
+        this.nearStar = star;
+      }
+    }
     return nearest;
   }
 

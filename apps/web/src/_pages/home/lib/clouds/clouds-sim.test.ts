@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createSkyLanding, LANDING_CAPACITY, type SkyLanding } from '../sky-landing';
 import { CloudsSimulation } from './clouds-sim';
 import { frameAt, type CloudsFrame } from './timeline';
 
@@ -267,5 +268,153 @@ describe('CloudsSimulation', () => {
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(-48);
     expect(Math.max(...ys)).toBeLessThanOrEqual(HEIGHT + 48);
     expect(ys.some((y, index) => index > 0 && y < (ys[index - 1] ?? 0))).toBe(true);
+  });
+});
+
+describe('CloudsSimulation: посадка на звёзды', () => {
+  /** Кадр конца посадки: капли должны стоять на своих звёздах. */
+  const LANDED_FRAME: CloudsFrame = { ...RISING_FRAME, settle: 1 };
+  const NO_SETTLE_FRAME: CloudsFrame = { ...RISING_FRAME, settle: 0 };
+  const TARGETS = [
+    { x: 100, y: 50, radius: 1 },
+    { x: 400, y: 120, radius: 2 },
+    { x: 800, y: 300, radius: 3 },
+  ] as const;
+
+  function createLanding(targets: readonly { x: number; y: number; radius: number }[] = TARGETS): SkyLanding {
+    const landing = createSkyLanding();
+    for (const [k, target] of targets.entries()) {
+      landing.x[k] = target.x;
+      landing.y[k] = target.y;
+      landing.radius[k] = target.radius;
+    }
+    landing.count = targets.length;
+    return landing;
+  }
+
+  function createLandingSim(landing: SkyLanding, count = 10): CloudsSimulation {
+    return new CloudsSimulation({ count, isSmallScreen: false, landing });
+  }
+
+  /** Номера капель, стоящих ровно на месте цели с таким радиусом. */
+  function dropsAt(sim: CloudsSimulation, target: { x: number; y: number; radius: number }): number[] {
+    return Array.from({ length: sim.count }, (_, i) => i).filter(
+      (i) => sim.x[i] === target.x && sim.y[i] === target.y && sim.radius[i] === target.radius,
+    );
+  }
+
+  it('при создании занимает по капле на цель, но не больше ёмкости стола', () => {
+    const small = createSkyLanding();
+    const big = createSkyLanding();
+
+    createLandingSim(small, 10);
+    createLandingSim(big, 100);
+
+    expect(small.claimed).toBe(10);
+    expect(big.claimed).toBe(LANDING_CAPACITY);
+  });
+
+  it('в конце посадки каждая цель занята одной каплей с радиусом севшей капли', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding());
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    for (const target of TARGETS) {
+      expect(dropsAt(sim, target)).toHaveLength(1);
+    }
+  });
+
+  it('севшая капля полностью видна и круглая', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding());
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    const landed = TARGETS.flatMap((target) => dropsAt(sim, target));
+    expect(landed.map((i) => sim.alpha[i])).toEqual([1, 1, 1]);
+    expect(landed.map((i) => sim.stretch[i])).toEqual([0, 0, 0]);
+  });
+
+  it('пока посадка не началась (settle = 0), капли летят так же, как без стола', () => {
+    fixRandom();
+    const withLanding = createLandingSim(createLanding());
+    const free = createSim(10);
+
+    stepMany(withLanding, NO_SETTLE_FRAME, { steps: 5, dt: 0.016 });
+    stepMany(free, NO_SETTLE_FRAME, { steps: 5, dt: 0.016 });
+
+    expect(withLanding.x).toEqual(free.x);
+    expect(withLanding.y).toEqual(free.y);
+    expect(withLanding.radius).toEqual(free.radius);
+  });
+
+  it('если капель больше, чем целей, лишние растворяются к концу посадки', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding());
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    const alphas = Array.from(sim.alpha);
+    expect(alphas.filter((alpha) => alpha > 0)).toHaveLength(3);
+    expect(alphas.filter((alpha) => alpha === 0)).toHaveLength(7);
+  });
+
+  it('если целей больше, чем капель, капли занимают только часть целей и не падают', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding(), 2);
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    expect(TARGETS.flatMap((target) => dropsAt(sim, target))).toHaveLength(2);
+  });
+
+  it('без целей на столе (count = 0) капли не садятся', () => {
+    fixRandom();
+    const landing = createLanding();
+    landing.count = 0;
+    const sim = createLandingSim(landing);
+    const free = createSim(10);
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+    free.step(0.016, LANDED_FRAME, CTX);
+
+    expect(sim.x).toEqual(free.x);
+    expect(sim.alpha).toEqual(free.alpha);
+  });
+
+  it('без стола посадки капли не садятся при любом settle', () => {
+    fixRandom();
+    const sim = createSim(10);
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    expect(TARGETS.flatMap((target) => dropsAt(sim, target))).toHaveLength(0);
+  });
+
+  it('если скролл вернулся назад (settle = 0), капли отпускают звёзды и возвращают свой радиус', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding());
+    const free = createSim(10);
+    free.step(0.016, NO_SETTLE_FRAME, CTX);
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+    sim.step(0.016, NO_SETTLE_FRAME, CTX);
+
+    expect(sim.radius).toEqual(free.radius);
+    expect(TARGETS.flatMap((target) => dropsAt(sim, target))).toHaveLength(0);
+  });
+
+  it('при повторной посадке цели раздаются заново', () => {
+    fixRandom();
+    const sim = createLandingSim(createLanding());
+
+    sim.step(0.016, LANDED_FRAME, CTX);
+    sim.step(0.016, NO_SETTLE_FRAME, CTX);
+    sim.step(0.016, LANDED_FRAME, CTX);
+
+    for (const target of TARGETS) {
+      expect(dropsAt(sim, target)).toHaveLength(1);
+    }
   });
 });

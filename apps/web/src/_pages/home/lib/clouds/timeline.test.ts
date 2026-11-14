@@ -114,5 +114,19 @@ describe('clouds timeline', () => {
       expect(frameAt(2.45).cloudsVisibility).toBe(1);
       expect(frameAt(2.92).cloudsVisibility).toBe(0);
     });
+
+    it('посадка капель на звёзды (settle) не идёт до 2,3 экрана', () => {
+      expect(frameAt(0).settle).toBe(0);
+      expect(frameAt(2.3).settle).toBe(0);
+    });
+
+    it('посадка растёт линейно между 2,3 экрана и концом вуали', () => {
+      expect(frameAt(2.59).settle).toBeCloseTo(0.5);
+    });
+
+    it('к концу вуали посадка закончена и дальше держится на 1', () => {
+      expect(frameAt(VEIL_END).settle).toBe(1);
+      expect(frameAt(CLOUDS_SCREENS).settle).toBe(1);
+    });
   });
 });

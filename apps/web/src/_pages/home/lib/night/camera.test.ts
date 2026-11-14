@@ -177,6 +177,19 @@ describe('overviewShot', () => {
     expect(shot.pose.distance).toBeCloseTo(150, 8);
     expect(shot.pose.targetX).toBeCloseTo(40, 8);
     expect(shot.pose.targetY).toBeCloseTo(35, 8);
+    expect(shot.pose.skyYaw).toBe(0);
+    expect(shot.pose.skyPitch).toBe(0);
+  });
+
+  it('с доворотом неба фигуры поворачивает только небо: ракурс и цель те же, что у общего плана', () => {
+    const input = { view: { width: 1000, height: 800 }, focal: 1500, key: 3 };
+    const layout = { originX: 100, originY: 50, scale: 10 };
+
+    const plain = overviewShot(input, layout);
+    const turned = overviewShot(input, layout, { yaw: 0.07, pitch: -0.14 });
+
+    expect(turned.pose).toEqual({ ...plain.pose, skyYaw: 0.07, skyPitch: -0.14 });
+    expect(turned.sway).toBe(1);
   });
 });
 
@@ -432,16 +445,31 @@ describe('Camera: покачивание общего плана', () => {
     expect(camera.current.yaw).toBeCloseTo(0.2 + 0.5 * DEGREES_5, 8);
   });
 
-  it('новый ход после покачивания начинается с текущего веса', () => {
+  it('новый ход посреди покачивания начинается с того же ракурса: небо не прыгает', () => {
     const camera = cameraAt(SWAYING);
     camera.aim(TARGET, 1900);
     camera.update(3500);
+    const yawBefore = camera.current.yaw;
+    const pitchBefore = camera.current.pitch;
 
     camera.aim({ ...SWAYING, key: 9 }, 3500);
     camera.update(3500);
 
-    // старт нового хода: текущий ракурс (0,2 + 0,5·5°) и вес 0,5 даёт ещё 0,5·5° поверх
-    expect(camera.current.yaw).toBeCloseTo(0.2 + DEGREES_5, 8);
+    // старт нового хода: тот же ракурс (0,2 + 0,5·5°), покачивание не добавляется второй раз
+    expect(yawBefore).toBeCloseTo(0.2 + 0.5 * DEGREES_5, 8);
+    expect(camera.current.yaw).toBeCloseTo(yawBefore, 8);
+    expect(camera.current.pitch).toBeCloseTo(pitchBefore, 8);
+  });
+
+  it('смена общего плана на общий план (узкий экран) не сдвигает небо в момент смены', () => {
+    const camera = cameraAt(SWAYING);
+    camera.update(3500);
+    const yawBefore = camera.current.yaw;
+
+    camera.aim({ ...SWAYING, key: 9 }, 3500);
+    camera.update(3500);
+
+    expect(camera.current.yaw).toBeCloseTo(yawBefore, 8);
   });
 });
 

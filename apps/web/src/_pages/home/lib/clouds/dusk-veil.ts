@@ -19,9 +19,8 @@ import { buildProgram } from './gl-program';
  *   f = ln(Σ exp(k·(r_i − d_i))) / k + C(t),   C(t) = 0.9·smoothstep(0.78, 0.99, t)
  * Покрытие = smoothstep(−a, a, f). Подъём C отложен к концу полосы, чтобы точки дольше росли и переходили в чёрное.
  *
- * Искры — редкие точки, которые тушь не закрывает никогда (покрытие там падает до 0.08, это цвет светлой туши
- * #ecece8). На белом их не видно; когда вокруг смыкается тушь, они остаются светлой пылью — из неё складывается
- * ночная дымка следующей сцены.
+ * Светлой пыли вуаль не оставляет (владелец 2026-11-14: пыль исчезала на стыке сцен и подменялась дымкой): в ночь
+ * уходят только капли туши, которые под вуалью светлеют и садятся на звёзды (clouds-sim.ts, lib/sky-landing.ts).
  *
  * Все слои медленно всплывают по времени (капли поднимаются снизу); скролл двигает только кромку.
  *
@@ -51,7 +50,6 @@ const vec3 VEIL_COLOR = vec3(244.0, 244.0, 242.0) / 255.0;
 const float BAND = 1.35;
 const float WARP = 0.24;
 const float MERGE = 12.0;
-const float SPECK_FLOOR = 0.08;
 
 vec3 hash3(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -95,19 +93,6 @@ float stipple(vec2 p, float tone, vec2 wake, float cellPx) {
   return smoothstep(-edge, edge, field);
 }
 
-// Искры: одна на ячейку 34 px, есть в двух ячейках из пяти, радиус 0.6…1.7 px, слабое мерцание
-float specks(vec2 px) {
-  const float CELL = 34.0;
-  vec2 p = px / CELL;
-  vec3 h = hash3(floor(p) + 91.7);
-  float exists = step(fract(h.z * 13.7), 0.4);
-  vec2 center = 0.5 + (h.xy - 0.5) * 0.7;
-  float d = length(fract(p) - center) * CELL;
-  float radius = 0.6 + 1.1 * h.z;
-  float twinkle = 0.78 + 0.22 * sin(uTime * 1.3 + h.x * 40.0);
-  return exists * twinkle * (1.0 - smoothstep(radius - 0.6, radius + 0.6, d));
-}
-
 void main() {
   vec2 px = vec2(gl_FragCoord.x, uResolution.y - gl_FragCoord.y) / uDpr;
   float y = px.y * uDpr / uResolution.y;
@@ -128,8 +113,6 @@ void main() {
     float fine = stipple((px + vec2(13.7, uTime * 5.0)) / fineCell, tone, vec2(0.18, 0.52), fineCell);
     ink = max(coarse, fine);
   }
-  ink *= 1.0 - (1.0 - SPECK_FLOOR) * specks(px + vec2(0.0, uTime * 3.0));
-
   fragColor = vec4(VEIL_COLOR * ink, ink);
 }
 `;
